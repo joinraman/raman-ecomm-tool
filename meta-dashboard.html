@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Meta Ads Dashboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f1117; color: #e1e4e8; padding: 24px; min-height: 100vh; }
+  h1 { font-size: 1.6rem; margin-bottom: 4px; color: #fff; }
+  .subtitle { color: #8b949e; font-size: 0.9rem; margin-bottom: 24px; }
+  h2 { font-size: 1.15rem; color: #c9d1d9; margin-bottom: 14px; }
+  .section { margin-bottom: 32px; }
+
+  /* Summary Cards */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 32px; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 18px 20px; }
+  .card .label { font-size: 0.78rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .card .value { font-size: 1.5rem; font-weight: 700; color: #58a6ff; }
+  .card .value.green { color: #3fb950; }
+  .card .value.purple { color: #bc8cff; }
+  .card .value.orange { color: #d29922; }
+  .card .value.red { color: #f85149; }
+
+  /* Chart */
+  .chart-container { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 20px; }
+  canvas { width: 100% !important; height: 320px !important; }
+
+  /* Tables */
+  .table-wrap { background: #161b22; border: 1px solid #30363d; border-radius: 10px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th { background: #1c2128; color: #8b949e; font-weight: 600; text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.4px; padding: 12px 14px; text-align: left; white-space: nowrap; position: sticky; top: 0; }
+  td { padding: 10px 14px; border-top: 1px solid #21262d; white-space: nowrap; }
+  tr:hover td { background: #1c2128; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .good { color: #3fb950; }
+  .bad { color: #f85149; }
+  .ad-name { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Funnel */
+  .funnel-grid { display: grid; grid-template-columns: 1fr; gap: 18px; }
+  .funnel-card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 18px 20px; }
+  .funnel-card h3 { font-size: 0.9rem; color: #58a6ff; margin-bottom: 12px; }
+  .funnel-bar-wrap { display: flex; align-items: center; margin-bottom: 8px; gap: 10px; }
+  .funnel-label { width: 130px; font-size: 0.78rem; color: #8b949e; text-align: right; flex-shrink: 0; }
+  .funnel-bar-bg { flex: 1; height: 26px; background: #21262d; border-radius: 4px; position: relative; overflow: hidden; }
+  .funnel-bar { height: 100%; border-radius: 4px; display: flex; align-items: center; padding-left: 8px; font-size: 0.75rem; font-weight: 600; color: #fff; min-width: 2px; transition: width 0.4s; }
+  .funnel-bar.c0 { background: #58a6ff; }
+  .funnel-bar.c1 { background: #bc8cff; }
+  .funnel-bar.c2 { background: #d29922; }
+  .funnel-bar.c3 { background: #f78166; }
+  .funnel-bar.c4 { background: #3fb950; }
+  .funnel-val { font-size: 0.78rem; color: #c9d1d9; width: 80px; flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<h1>Meta Ads Performance Dashboard</h1>
+<p class="subtitle" id="dateRange"></p>
+
+<div class="cards" id="summaryCards"></div>
+
+<div class="section">
+  <h2>Daily Spend vs Revenue</h2>
+  <div class="chart-container"><canvas id="trendChart"></canvas></div>
+</div>
+
+<div class="section">
+  <h2>Campaign Breakdown</h2>
+  <div class="table-wrap"><table id="campaignTable"></table></div>
+</div>
+
+<div class="section" style="display:grid; grid-template-columns: 1fr 1fr; gap: 18px;">
+  <div>
+    <h2>Top 5 Ads by ROAS</h2>
+    <div class="table-wrap"><table id="topAdsTable"></table></div>
+  </div>
+  <div>
+    <h2>Bottom 5 Ads by Cost per Purchase</h2>
+    <div class="table-wrap"><table id="bottomAdsTable"></table></div>
+  </div>
+</div>
+
+<div class="section">
+  <h2>Funnel Breakdown by Campaign</h2>
+  <div class="funnel-grid" id="funnelGrid"></div>
+</div>
+
+<script>
+// Embedded CSV data
+const csvText = `Day,"Campaign name","Ad set name","Ad name","Amount spent (GBP)",Purchases,"Purchases conversion value","Cost per purchase","Adds to cart","Cost per add to cart","Checkouts initiated","Cost per checkout initiated",Impressions,"CPM (cost per 1,000 impressions)","CPC (cost per link click)","CTR (link click-through rate)","Link clicks","Landing page views",Reach,"Reporting starts","Reporting ends"
+2026-03-19,"RX - Bald Boss - UK - M&F - Sales - CBO","Core - Bald Boss - Broad - UK - All 18+ | AP - 24/1","Expost - 112 ICT - 5 Iterations Before After - Bald Boss - Img - LP.PDP - 1639168760777607",24.92,,,,1,24.92,,,2591,9.61790814,1.246,0.77190274,20,13,2291,2026-03-19,2026-03-19
+2026-03-19,"RX - Bald Boss - UK - M&F - Sales - CBO","Core - Bald Boss - Broad - UK - All 18+ | AP - 24/1","Expost - 110 DCT - Post it notes - Bald Boss - Img - AC.snowstorm - LP.PDP - 1599549518072865",9.49,,,,1,9.49,2,4.745,810,11.71604938,1.58166667,0.74074074,6,4,656,2026-03-19,2026-03-19
+2026-03-19,"RX - Bald Boss - UK - M&F - Sales - CBO","Core - Bald Boss - Broad - UK - All 18+ | AP - 24/1","Expost - DCT2 - Before After - Bald Boss - Img - AC.snowstorm - LP.PDP - 1627273965300420",76.22,4,110.64,19.055,7,10.88857143,5,15.244,13186,5.78037312,0.72590476,0.79629911,105,62,12179,2026-03-19,2026-03-19
+2026-03-19,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 6 Bald Care Set - Gifting - Img - AC.1 - LP.PDP - 1637708984256918",9.59,,,,2,4.795,2,4.795,2100,4.56666667,1.37,0.33333333,7,4,1374,2026-03-19,2026-03-19
+2026-03-19,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 2 Bald Care Set - Gifting - Img - AC.1 - LP.PDP -1637708960923587",2.98,,,,,,,,738,4.03794038,2.98,0.13550136,1,1,544,2026-03-19,2026-03-19
+2026-03-19,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - V3 Richard Img - Bald Care Set - Img - AC1 - LP.PDP - 1664942914866858",2.12,,,,,,,,521,4.06909789,0.35333333,1.15163148,6,4,392,2026-03-19,2026-03-19
+2026-03-19,"RX - Bald Boss - UK - M&F - Sales - CBO","1 DCT - Founders Story - Bald Boss - Broad - UK - All 18+ | AP - 23/1","7 DCT - 1 Founders Story - Bald Care Set - Img - 3AC - LP.PDP – Copy",7.61,1,21.14,7.61,2,3.805,1,7.61,892,8.53139013,0.95125,0.89686099,8,5,803,2026-03-19,2026-03-19
+2026-03-19,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V4 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",5.13,,,,,,,,856,5.99299065,1.026,0.58411215,5,1,692,2026-03-19,2026-03-19
+2026-03-19,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V2 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",6.22,1,45.97,6.22,,,,,1476,4.21409214,0.51833333,0.81300813,12,4,1112,2026-03-19,2026-03-19
+2026-03-19,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V1 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",43.28,1,40.98,43.28,3,14.42666667,2,21.64,8395,5.15544967,0.73355932,0.70279929,59,26,5834,2026-03-19,2026-03-19
+2026-03-19,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V5 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",2.99,,,,,,,,691,4.32706223,0.49833333,0.8683068,6,3,540,2026-03-19,2026-03-19
+2026-03-19,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V5 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",0.54,,,,,,,,84,6.42857143,0.54,1.19047619,1,,81,2026-03-19,2026-03-19
+2026-03-19,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V3 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",0.54,,,,,,,,70,7.71428571,,,,,60,2026-03-19,2026-03-19
+2026-03-19,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V1 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",3.96,,,,,,,,640,6.1875,1.32,0.46875,3,,537,2026-03-19,2026-03-19
+2026-03-19,"RX - SPF50 - UK - M&F - Sales - CBO","1 DCT - Post Its - SPF50 - Broad - UK - All 18+ | AP - 2/3","1 DCT - 2 Post Its - SPF50 - Img - 2AC - LP.PDP",1.33,,,,,,,,142,9.36619718,1.33,0.70422535,1,1,117,2026-03-19,2026-03-19
+2026-03-19,"RX - SPF50 - UK - M&F - Sales - CBO","1 DCT - Post Its - SPF50 - Broad - UK - All 18+ | AP - 2/3","1 DCT - 3 Post Its - SPF50 - Img - 2AC - LP.PDP",0.02,,,,,,,,3,6.66666667,,,,,3,2026-03-19,2026-03-19
+2026-03-19,"RX - SPF50 - UK - M&F - Sales - CBO","2 DCT - Professional Img - SPF50 - Broad - UK - All 18+ | AP - 2/3","2 DCT - 1 Professional Img - SPF50 - Img - 2AC - LP.PDP",0.03,,,,,,,,1,30,,,,,1,2026-03-19,2026-03-19
+2026-03-19,"RX - SPF50 - UK - M&F - Sales - CBO","2 DCT - Professional Img - SPF50 - Broad - UK - All 18+ | AP - 2/3","2 DCT - 2 Professional Img - SPF50 - Img - 2AC - LP.PDP",0.24,,,,,,,,23,10.43478261,0.12,8.69565217,2,1,23,2026-03-19,2026-03-19
+2026-03-19,"RX - SPF50 - UK - M&F - Sales - CBO","2 DCT - Professional Img - SPF50 - Broad - UK - All 18+ | AP - 2/3","2 DCT - 3 Professional Img - SPF50 - Img - 2AC - LP.PDP",0.31,,,,,,,,24,12.91666667,,,,,23,2026-03-19,2026-03-19
+2026-03-19,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 10 DCT - 3 Newly Bald? Skincare Routine - Bald Care Set - Img - 2AC - LP.PDP - 1745039176857231",7.33,,,,,,,,1686,4.34756821,0.56384615,0.77105575,13,3,1193,2026-03-19,2026-03-19
+2026-03-19,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 14 DCT - 2 Bald Man Skincare Routine - Bald Care Set - Img - 2AC - LP.PDP - 1745068416854307",15.42,,,,,,,,3563,4.32781364,0.70090909,0.6174572,22,10,2213,2026-03-19,2026-03-19
+2026-03-19,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 1 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",0.35,,,,,,,,15,23.33333333,,,,,15,2026-03-19,2026-03-19
+2026-03-19,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 2 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",38.86,1,22.58,38.86,3,12.95333333,2,19.43,3749,10.36543078,1.25354839,0.82688717,31,29,2752,2026-03-19,2026-03-19
+2026-03-19,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 5 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",0.46,,,,,,,,28,16.42857143,,,,,26,2026-03-19,2026-03-19
+2026-03-19,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 6 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",1.16,,,,,,,,80,14.5,,,,,70,2026-03-19,2026-03-19
+2026-03-19,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 4 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",0.01,,,,,,,,1,10,,,,,1,2026-03-19,2026-03-19
+2026-03-20,"RX - Bald Boss - UK - M&F - Sales - CBO","Core - Bald Boss - Broad - UK - All 18+ | AP - 24/1","Expost - 112 ICT - 5 Iterations Before After - Bald Boss - Img - LP.PDP - 1639168760777607",16.12,,,,,,,,1783,9.04094223,1.24,0.72910824,13,10,1526,2026-03-20,2026-03-20
+2026-03-20,"RX - Bald Boss - UK - M&F - Sales - CBO","Core - Bald Boss - Broad - UK - All 18+ | AP - 24/1","Expost - 110 DCT - Post it notes - Bald Boss - Img - AC.snowstorm - LP.PDP - 1599549518072865",8.13,2,55.84,4.065,1,8.13,2,4.065,722,11.26038781,0.90333333,1.2465374,9,9,591,2026-03-20,2026-03-20
+2026-03-20,"RX - Bald Boss - UK - M&F - Sales - CBO","Core - Bald Boss - Broad - UK - All 18+ | AP - 24/1","Expost - DCT2 - Before After - Bald Boss - Img - AC.snowstorm - LP.PDP - 1627273965300420",82.28,4,86.44,20.57,9,9.14222222,6,13.71333333,15230,5.40249508,0.76185185,0.70912672,108,70,13912,2026-03-20,2026-03-20
+2026-03-20,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 6 Bald Care Set - Gifting - Img - AC.1 - LP.PDP - 1637708984256918",9.5,,,,1,9.5,,,2040,4.65686275,1.58333333,0.29411765,6,3,1316,2026-03-20,2026-03-20
+2026-03-20,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 2 Bald Care Set - Gifting - Img - AC.1 - LP.PDP -1637708960923587",2.37,,,,,,,,545,4.34862385,0.474,0.91743119,5,,428,2026-03-20,2026-03-20
+2026-03-20,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - V3 Richard Img - Bald Care Set - Img - AC1 - LP.PDP - 1664942914866858",1.13,,,,,,,,251,4.50199203,,,,1,201,2026-03-20,2026-03-20
+2026-03-20,"RX - Bald Boss - UK - M&F - Sales - CBO","1 DCT - Founders Story - Bald Boss - Broad - UK - All 18+ | AP - 23/1","7 DCT - 1 Founders Story - Bald Care Set - Img - 3AC - LP.PDP – Copy",7.3,,,,,,,,691,10.56439942,0.81111111,1.3024602,9,4,650,2026-03-20,2026-03-20
+2026-03-20,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V4 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",7.19,1,20.18,7.19,1,7.19,2,3.595,1381,5.20637219,0.55307692,0.94134685,13,8,1175,2026-03-20,2026-03-20
+2026-03-20,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V2 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",14.33,1,24.98,14.33,1,14.33,1,14.33,3619,3.95965736,1.10230769,0.35921525,13,6,2401,2026-03-20,2026-03-20
+2026-03-20,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V1 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",34.07,2,80.53,17.035,1,34.07,1,34.07,5871,5.80309998,0.89657895,0.64724919,38,22,4250,2026-03-20,2026-03-20
+2026-03-20,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V5 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",4.11,,,,,,,,1198,3.43071786,0.685,0.50083472,6,2,921,2026-03-20,2026-03-20
+2026-03-20,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V5 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",0.07,,,,,,,,11,6.36363636,0.07,9.09090909,1,,11,2026-03-20,2026-03-20
+2026-03-20,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V3 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",1.68,,,,,,,,452,3.71681416,0.84,0.44247788,2,,360,2026-03-20,2026-03-20
+2026-03-20,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V1 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",7.21,,,,,,,,1287,5.6021756,1.20166667,0.46620047,6,2,1063,2026-03-20,2026-03-20
+2026-03-20,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V2 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",0.02,,,,,,,,3,6.66666667,,,,,3,2026-03-20,2026-03-20
+2026-03-20,"RX - SPF50 - UK - M&F - Sales - CBO","1 DCT - Post Its - SPF50 - Broad - UK - All 18+ | AP - 2/3","1 DCT - 2 Post Its - SPF50 - Img - 2AC - LP.PDP",0.76,,,,,,,,75,10.13333333,,,,,66,2026-03-20,2026-03-20
+2026-03-20,"RX - SPF50 - UK - M&F - Sales - CBO","1 DCT - Post Its - SPF50 - Broad - UK - All 18+ | AP - 2/3","1 DCT - 3 Post Its - SPF50 - Img - 2AC - LP.PDP",0.1,,,,,,,,15,6.66666667,,,,,13,2026-03-20,2026-03-20
+2026-03-20,"RX - SPF50 - UK - M&F - Sales - CBO","2 DCT - Professional Img - SPF50 - Broad - UK - All 18+ | AP - 2/3","2 DCT - 5 Professional Img - SPF50 - Img - 2AC - LP.PDP",0.08,,,,,,,,7,11.42857143,0.08,14.28571429,1,1,7,2026-03-20,2026-03-20
+2026-03-20,"RX - SPF50 - UK - M&F - Sales - CBO","2 DCT - Professional Img - SPF50 - Broad - UK - All 18+ | AP - 2/3","2 DCT - 3 Professional Img - SPF50 - Img - 2AC - LP.PDP",0.16,,,,,,,,16,10,,,,,15,2026-03-20,2026-03-20
+2026-03-20,"RX - SPF50 - UK - M&F - Sales - CBO","2 DCT - Professional Img - SPF50 - Broad - UK - All 18+ | AP - 2/3","2 DCT - 4 Professional Img - SPF50 - Img - 2AC - LP.PDP",0.01,,,,,,,,4,2.5,,,,,4,2026-03-20,2026-03-20
+2026-03-20,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 10 DCT - 3 Newly Bald? Skincare Routine - Bald Care Set - Img - 2AC - LP.PDP - 1745039176857231",4.59,,,,,,,,816,5.625,0.765,0.73529412,6,3,617,2026-03-20,2026-03-20
+2026-03-20,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 14 DCT - 2 Bald Man Skincare Routine - Bald Care Set - Img - 2AC - LP.PDP - 1745068416854307",11.66,,,,,,,,2363,4.93440542,1.29555556,0.38087177,9,9,1567,2026-03-20,2026-03-20
+2026-03-20,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 1 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",0.3,,,,,,,,36,8.33333333,0.3,2.77777778,1,,34,2026-03-20,2026-03-20
+2026-03-20,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 3 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",0.04,,,,,,,,5,8,,,,,5,2026-03-20,2026-03-20
+2026-03-20,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 2 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",37.23,1,26.98,37.23,7,5.31857143,1,37.23,3285,11.33333333,0.95461538,1.18721461,39,24,2604,2026-03-20,2026-03-20
+2026-03-20,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 5 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",0.9,,,,,,,,70,12.85714286,0.9,1.42857143,1,1,58,2026-03-20,2026-03-20
+2026-03-20,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 6 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",0.71,,,,,,,,44,16.13636364,0.71,2.27272727,1,1,36,2026-03-20,2026-03-20
+2026-03-21,"RX - Bald Boss - UK - M&F - Sales - CBO","Core - Bald Boss - Broad - UK - All 18+ | AP - 24/1","Expost - 112 ICT - 5 Iterations Before After - Bald Boss - Img - LP.PDP - 1639168760777607",15.81,1,20.18,15.81,2,7.905,1,15.81,1712,9.23481308,1.581,0.58411215,10,7,1466,2026-03-21,2026-03-21
+2026-03-21,"RX - Bald Boss - UK - M&F - Sales - CBO","Core - Bald Boss - Broad - UK - All 18+ | AP - 24/1","Expost - 110 DCT - Post it notes - Bald Boss - Img - AC.snowstorm - LP.PDP - 1599549518072865",14.2,,,,,,,,1134,12.52204586,1.29090909,0.97001764,11,8,831,2026-03-21,2026-03-21
+2026-03-21,"RX - Bald Boss - UK - M&F - Sales - CBO","Core - Bald Boss - Broad - UK - All 18+ | AP - 24/1","Expost - DCT2 - Before After - Bald Boss - Img - AC.snowstorm - LP.PDP - 1627273965300420",87.81,5,148.91,17.562,7,12.54428571,7,12.54428571,15573,5.63860528,0.76356522,0.73845759,115,76,14084,2026-03-21,2026-03-21
+2026-03-21,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 6 Bald Care Set - Gifting - Img - AC.1 - LP.PDP - 1637708984256918",9.36,,,,,,,,1715,5.45772595,0.66857143,0.81632653,14,10,1124,2026-03-21,2026-03-21
+2026-03-21,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 2 Bald Care Set - Gifting - Img - AC.1 - LP.PDP -1637708960923587",2.05,,,,,,,,465,4.40860215,,,,,342,2026-03-21,2026-03-21
+2026-03-21,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - V3 Richard Img - Bald Care Set - Img - AC1 - LP.PDP - 1664942914866858",0.92,,,,,,,,197,4.67005076,0.46,1.01522843,2,,167,2026-03-21,2026-03-21
+2026-03-21,"RX - Bald Boss - UK - M&F - Sales - CBO","1 DCT - Founders Story - Bald Boss - Broad - UK - All 18+ | AP - 23/1","7 DCT - 1 Founders Story - Bald Care Set - Img - 3AC - LP.PDP – Copy",3.49,,,,,,,,367,9.50953678,1.745,0.54495913,2,2,348,2026-03-21,2026-03-21
+2026-03-21,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V4 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",7.12,,,,,,,,1547,4.60245637,2.37333333,0.19392372,3,,1200,2026-03-21,2026-03-21
+2026-03-21,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V2 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",13.97,1,42.17,13.97,2,6.985,1,13.97,3643,3.83475158,0.77611111,0.49409827,18,7,2655,2026-03-21,2026-03-21
+2026-03-21,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V1 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",30.42,,,,,,1,30.42,4868,6.24897288,0.72428571,0.86277732,42,22,3302,2026-03-21,2026-03-21
+2026-03-21,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V5 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",3.12,,,,,,,,859,3.63213038,0.624,0.58207218,5,4,672,2026-03-21,2026-03-21
+2026-03-21,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V4 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",0.06,,,,,,,,2,30,,,,,2,2026-03-21,2026-03-21
+2026-03-21,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V5 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",8.26,,,,,,,,1395,5.92114695,2.065,0.28673835,4,,1083,2026-03-21,2026-03-21
+2026-03-21,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V3 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",1.39,,,,,,,,271,5.12915129,,,,,244,2026-03-21,2026-03-21
+2026-03-21,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V1 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",4.47,,,,,,,,810,5.51851852,0.447,1.2345679,10,3,665,2026-03-21,2026-03-21
+2026-03-21,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V2 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",0.29,,,,,,,,64,4.53125,,,,,55,2026-03-21,2026-03-21
+2026-03-21,"RX - SPF50 - UK - M&F - Sales - CBO","1 DCT - Post Its - SPF50 - Broad - UK - All 18+ | AP - 2/3","1 DCT - 2 Post Its - SPF50 - Img - 2AC - LP.PDP",2.4,,,,,,1,2.4,196,12.24489796,1.2,1.02040816,2,2,174,2026-03-21,2026-03-21
+2026-03-21,"RX - SPF50 - UK - M&F - Sales - CBO","2 DCT - Professional Img - SPF50 - Broad - UK - All 18+ | AP - 2/3","2 DCT - 2 Professional Img - SPF50 - Img - 2AC - LP.PDP",0.08,,,,,,,,9,8.88888889,,,,,9,2026-03-21,2026-03-21
+2026-03-21,"RX - SPF50 - UK - M&F - Sales - CBO","2 DCT - Professional Img - SPF50 - Broad - UK - All 18+ | AP - 2/3","2 DCT - 3 Professional Img - SPF50 - Img - 2AC - LP.PDP",1.19,,,,,,,,65,18.30769231,1.19,1.53846154,1,,55,2026-03-21,2026-03-21
+2026-03-21,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 10 DCT - 3 Newly Bald? Skincare Routine - Bald Care Set - Img - 2AC - LP.PDP - 1745039176857231",6.23,,,,,,,,1223,5.09403107,1.5575,0.3270646,4,2,896,2026-03-21,2026-03-21
+2026-03-21,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 14 DCT - 2 Bald Man Skincare Routine - Bald Care Set - Img - 2AC - LP.PDP - 1745068416854307",15.92,1,72.99,15.92,3,5.30666667,1,15.92,2854,5.57813595,0.995,0.56061668,16,10,1818,2026-03-21,2026-03-21
+2026-03-21,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 1 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",0.25,,,,,,,,9,27.77777778,,,,,9,2026-03-21,2026-03-21
+2026-03-21,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 2 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",35.37,3,77.65,11.79,6,5.895,2,17.685,3120,11.33653846,0.84214286,1.34615385,42,26,2493,2026-03-21,2026-03-21
+2026-03-21,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 5 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",0.58,,,,,,,,34,17.05882353,,,,,31,2026-03-21,2026-03-21
+2026-03-21,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 6 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",1.46,,,,,,,,71,20.56338028,,,,,60,2026-03-21,2026-03-21
+2026-03-22,"RX - Bald Boss - UK - M&F - Sales - CBO","Core - Bald Boss - Broad - UK - All 18+ | AP - 24/1","Expost - 112 ICT - 5 Iterations Before After - Bald Boss - Img - LP.PDP - 1639168760777607",18.75,,,,,,,,2121,8.84016973,0.89285714,0.99009901,21,12,1735,2026-03-22,2026-03-22
+2026-03-22,"RX - Bald Boss - UK - M&F - Sales - CBO","Core - Bald Boss - Broad - UK - All 18+ | AP - 24/1","Expost - 110 DCT - Post it notes - Bald Boss - Img - AC.snowstorm - LP.PDP - 1599549518072865",15.19,1,20.18,15.19,3,5.06333333,1,15.19,1284,11.83021807,1.16846154,1.01246106,13,10,932,2026-03-22,2026-03-22
+2026-03-22,"RX - Bald Boss - UK - M&F - Sales - CBO","Core - Bald Boss - Broad - UK - All 18+ | AP - 24/1","Expost - DCT2 - Before After - Bald Boss - Img - AC.snowstorm - LP.PDP - 1627273965300420",96.91,4,90.24,24.2275,6,16.15166667,4,24.2275,17046,5.68520474,0.80758333,0.70397747,120,73,15294,2026-03-22,2026-03-22
+2026-03-22,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 6 Bald Care Set - Gifting - Img - AC.1 - LP.PDP - 1637708984256918",14.56,2,76.28,7.28,2,7.28,2,7.28,2981,4.88426702,1.456,0.3354579,10,7,1770,2026-03-22,2026-03-22
+2026-03-22,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 2 Bald Care Set - Gifting - Img - AC.1 - LP.PDP -1637708960923587",2.02,,,,,,,,463,4.36285097,,,,,314,2026-03-22,2026-03-22
+2026-03-22,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - V3 Richard Img - Bald Care Set - Img - AC1 - LP.PDP - 1664942914866858",1.96,,,,,,,,373,5.25469169,1.96,0.26809651,1,,275,2026-03-22,2026-03-22
+2026-03-22,"RX - Bald Boss - UK - M&F - Sales - CBO","1 DCT - Founders Story - Bald Boss - Broad - UK - All 18+ | AP - 23/1","7 DCT - 1 Founders Story - Bald Care Set - Img - 3AC - LP.PDP – Copy",2.27,1,44.98,2.27,1,2.27,1,2.27,269,8.43866171,1.135,0.74349442,2,,249,2026-03-22,2026-03-22
+2026-03-22,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V4 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",8.04,,,,,,,,1893,4.24722662,0.47294118,0.89804543,17,10,1470,2026-03-22,2026-03-22
+2026-03-22,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V2 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",20.42,1,23.98,20.42,1,20.42,1,20.42,4138,4.93475109,0.97238095,0.50749154,21,11,2960,2026-03-22,2026-03-22
+2026-03-22,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V1 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",30.39,,,,,,,,5084,5.97757671,0.82135135,0.72777341,37,21,3438,2026-03-22,2026-03-22
+2026-03-22,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V5 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",2.81,,,,,,,,969,2.8998968,0.7025,0.4127967,4,1,704,2026-03-22,2026-03-22
+2026-03-22,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V4 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",3.37,,,,,,,,330,10.21212121,1.12333333,0.90909091,3,1,260,2026-03-22,2026-03-22
+2026-03-22,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V5 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",6.62,,,,,,,,1513,4.37541309,0.662,0.66093853,10,4,1161,2026-03-22,2026-03-22
+2026-03-22,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V3 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",2.23,,,,,,,,584,3.81849315,0.74333333,0.51369863,3,1,494,2026-03-22,2026-03-22
+2026-03-22,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V1 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",2.21,,,,,,,,648,3.41049383,0.442,0.77160494,5,2,488,2026-03-22,2026-03-22
+2026-03-22,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V2 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",1.55,,,,,,,,329,4.7112462,1.55,0.30395137,1,,236,2026-03-22,2026-03-22
+2026-03-22,"RX - SPF50 - UK - M&F - Sales - CBO","1 DCT - Post Its - SPF50 - Broad - UK - All 18+ | AP - 2/3","1 DCT - 2 Post Its - SPF50 - Img - 2AC - LP.PDP",0.71,,,,,,,,68,10.44117647,0.71,1.47058824,1,1,65,2026-03-22,2026-03-22
+2026-03-22,"RX - SPF50 - UK - M&F - Sales - CBO","1 DCT - Post Its - SPF50 - Broad - UK - All 18+ | AP - 2/3","1 DCT - 3 Post Its - SPF50 - Img - 2AC - LP.PDP",0,,,,,,,,2,0,,,,,2,2026-03-22,2026-03-22
+2026-03-22,"RX - SPF50 - UK - M&F - Sales - CBO","2 DCT - Professional Img - SPF50 - Broad - UK - All 18+ | AP - 2/3","2 DCT - 5 Professional Img - SPF50 - Img - 2AC - LP.PDP",0.14,,,,,,,,11,12.72727273,,,,,11,2026-03-22,2026-03-22
+2026-03-22,"RX - SPF50 - UK - M&F - Sales - CBO","2 DCT - Professional Img - SPF50 - Broad - UK - All 18+ | AP - 2/3","2 DCT - 2 Professional Img - SPF50 - Img - 2AC - LP.PDP",0.12,,,,,,,,17,7.05882353,,,,,15,2026-03-22,2026-03-22
+2026-03-22,"RX - SPF50 - UK - M&F - Sales - CBO","2 DCT - Professional Img - SPF50 - Broad - UK - All 18+ | AP - 2/3","2 DCT - 3 Professional Img - SPF50 - Img - 2AC - LP.PDP",0.02,,,,,,,,4,5,,,,,4,2026-03-22,2026-03-22
+2026-03-22,"RX - SPF50 - UK - M&F - Sales - CBO","2 DCT - Professional Img - SPF50 - Broad - UK - All 18+ | AP - 2/3","2 DCT - 4 Professional Img - SPF50 - Img - 2AC - LP.PDP",0,,,,,,,,1,0,,,,,1,2026-03-22,2026-03-22
+2026-03-22,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 10 DCT - 3 Newly Bald? Skincare Routine - Bald Care Set - Img - 2AC - LP.PDP - 1745039176857231",5.35,,,,,,,,958,5.58455115,0.59444444,0.9394572,9,5,700,2026-03-22,2026-03-22
+2026-03-22,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 14 DCT - 2 Bald Man Skincare Routine - Bald Care Set - Img - 2AC - LP.PDP - 1745068416854307",12.07,,,,,,,,1858,6.49623251,0.63526316,1.02260495,19,12,1159,2026-03-22,2026-03-22
+2026-03-22,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 1 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",0.41,,,,,,,,15,27.33333333,,,,,15,2026-03-22,2026-03-22
+2026-03-22,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 3 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",0,,,,,,,,1,0,,,,,1,2026-03-22,2026-03-22
+2026-03-22,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 2 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",46.75,3,103.11,15.58333333,10,4.675,5,9.35,4468,10.46329454,0.6584507,1.58907789,71,57,3571,2026-03-22,2026-03-22
+2026-03-22,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 5 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",0.69,,,,,,,,19,36.31578947,,,,,17,2026-03-22,2026-03-22
+2026-03-22,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 6 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",1.7,,,,,,,,86,19.76744186,0.85,2.3255814,2,2,72,2026-03-22,2026-03-22
+2026-03-23,"RX - Bald Boss - UK - M&F - Sales - CBO","Core - Bald Boss - Broad - UK - All 18+ | AP - 24/1","Expost - 112 ICT - 5 Iterations Before After - Bald Boss - Img - LP.PDP - 1639168760777607",25.71,1,23.98,25.71,1,25.71,1,25.71,2902,8.85940731,1.07125,0.82701585,24,17,2481,2026-03-23,2026-03-23
+2026-03-23,"RX - Bald Boss - UK - M&F - Sales - CBO","Core - Bald Boss - Broad - UK - All 18+ | AP - 24/1","Expost - 110 DCT - Post it notes - Bald Boss - Img - AC.snowstorm - LP.PDP - 1599549518072865",12.09,1,35.37,12.09,2,6.045,3,4.03,984,12.28658537,2.418,0.50813008,5,1,778,2026-03-23,2026-03-23
+2026-03-23,"RX - Bald Boss - UK - M&F - Sales - CBO","Core - Bald Boss - Broad - UK - All 18+ | AP - 24/1","Expost - DCT2 - Before After - Bald Boss - Img - AC.snowstorm - LP.PDP - 1627273965300420",86.59,,,,6,14.43166667,6,14.43166667,14697,5.89167857,0.78009009,0.75525617,111,69,13439,2026-03-23,2026-03-23
+2026-03-23,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 6 Bald Care Set - Gifting - Img - AC.1 - LP.PDP - 1637708984256918",13.48,,,,,,,,2669,5.05058074,1.03692308,0.48707381,13,7,1702,2026-03-23,2026-03-23
+2026-03-23,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 2 Bald Care Set - Gifting - Img - AC.1 - LP.PDP -1637708960923587",1.84,,,,,,,,401,4.58852868,1.84,0.24937656,1,1,294,2026-03-23,2026-03-23
+2026-03-23,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - V3 Richard Img - Bald Care Set - Img - AC1 - LP.PDP - 1664942914866858",1.76,,,,,,,,348,5.05747126,1.76,0.28735632,1,,258,2026-03-23,2026-03-23
+2026-03-23,"RX - Bald Boss - UK - M&F - Sales - CBO","1 DCT - Founders Story - Bald Boss - Broad - UK - All 18+ | AP - 23/1","7 DCT - 1 Founders Story - Bald Care Set - Img - 3AC - LP.PDP – Copy",0.55,,,,,,,,50,11,,,,,45,2026-03-23,2026-03-23
+2026-03-23,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V4 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",8.81,,,,,,,,2152,4.09386617,1.10125,0.37174721,8,4,1684,2026-03-23,2026-03-23
+2026-03-23,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V2 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",16.03,,,,1,16.03,,,3673,4.36427988,0.72863636,0.59896542,22,9,2673,2026-03-23,2026-03-23
+2026-03-23,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V1 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",25.49,1,44.98,25.49,2,12.745,1,25.49,4550,5.6021978,0.72828571,0.76923077,35,15,2904,2026-03-23,2026-03-23
+2026-03-23,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V5 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",2.58,,,,,,,,771,3.3463035,,,,,585,2026-03-23,2026-03-23
+2026-03-23,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V4 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",1.76,,,,,,,,216,8.14814815,1.76,0.46296296,1,1,180,2026-03-23,2026-03-23
+2026-03-23,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V5 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",5.95,,,,,,,,1276,4.6630094,1.19,0.39184953,5,3,1056,2026-03-23,2026-03-23
+2026-03-23,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V3 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",0.39,,,,,,,,87,4.48275862,,,,,79,2026-03-23,2026-03-23
+2026-03-23,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V1 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",3.82,,,,,,,,1065,3.58685446,0.4775,0.75117371,8,2,831,2026-03-23,2026-03-23
+2026-03-23,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V2 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",0.02,,,,,,,,6,3.33333333,,,,,6,2026-03-23,2026-03-23
+2026-03-23,"RX - SPF50 - UK - M&F - Sales - CBO","1 DCT - Post Its - SPF50 - Broad - UK - All 18+ | AP - 2/3","1 DCT - 1 Post Its - SPF50 - Img - 2AC - LP.PDP",0.06,,,,,,,,3,20,,,,,3,2026-03-23,2026-03-23
+2026-03-23,"RX - SPF50 - UK - M&F - Sales - CBO","1 DCT - Post Its - SPF50 - Broad - UK - All 18+ | AP - 2/3","1 DCT - 2 Post Its - SPF50 - Img - 2AC - LP.PDP",0.63,,,,,,,,65,9.69230769,,,,,63,2026-03-23,2026-03-23
+2026-03-23,"RX - SPF50 - UK - M&F - Sales - CBO","2 DCT - Professional Img - SPF50 - Broad - UK - All 18+ | AP - 2/3","2 DCT - 5 Professional Img - SPF50 - Img - 2AC - LP.PDP",0.02,,,,,,,,2,10,,,,,2,2026-03-23,2026-03-23
+2026-03-23,"RX - SPF50 - UK - M&F - Sales - CBO","2 DCT - Professional Img - SPF50 - Broad - UK - All 18+ | AP - 2/3","2 DCT - 3 Professional Img - SPF50 - Img - 2AC - LP.PDP",0,,,,,,,,1,0,,,,,1,2026-03-23,2026-03-23
+2026-03-23,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 10 DCT - 3 Newly Bald? Skincare Routine - Bald Care Set - Img - 2AC - LP.PDP - 1745039176857231",5.12,,,,,,,,808,6.33663366,0.85333333,0.74257426,6,3,635,2026-03-23,2026-03-23
+2026-03-23,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 14 DCT - 2 Bald Man Skincare Routine - Bald Care Set - Img - 2AC - LP.PDP - 1745068416854307",11.94,,,,,,,,2041,5.85007349,0.597,0.97991181,20,13,1307,2026-03-23,2026-03-23
+2026-03-23,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 1 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",0.04,,,,,,,,3,13.33333333,,,,,3,2026-03-23,2026-03-23
+2026-03-23,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 2 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",38.21,1,26.98,38.21,2,19.105,,,3590,10.64345404,0.93195122,1.14206128,41,33,2767,2026-03-23,2026-03-23
+2026-03-23,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 5 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",0.16,,,,,,,,9,17.77777778,,,,,9,2026-03-23,2026-03-23
+2026-03-23,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 6 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",1.15,,,,,,,,117,9.82905983,0.575,1.70940171,2,2,96,2026-03-23,2026-03-23
+2026-03-24,"RX - Bald Boss - UK - M&F - Sales - CBO","Core - Bald Boss - Broad - UK - All 18+ | AP - 24/1","Expost - 112 ICT - 5 Iterations Before After - Bald Boss - Img - LP.PDP - 1639168760777607",24.23,3,47.96,8.07666667,5,4.846,5,4.846,2696,8.98738872,0.80766667,1.11275964,30,23,2285,2026-03-24,2026-03-24
+2026-03-24,"RX - Bald Boss - UK - M&F - Sales - CBO","Core - Bald Boss - Broad - UK - All 18+ | AP - 24/1","Expost - 110 DCT - Post it notes - Bald Boss - Img - AC.snowstorm - LP.PDP - 1599549518072865",17.32,,,,,,,,1389,12.46940245,1.57454545,0.79193665,11,7,998,2026-03-24,2026-03-24
+2026-03-24,"RX - Bald Boss - UK - M&F - Sales - CBO","Core - Bald Boss - Broad - UK - All 18+ | AP - 24/1","Expost - DCT2 - Before After - Bald Boss - Img - AC.snowstorm - LP.PDP - 1627273965300420",99.2,7,158.16,14.17142857,10,9.92,10,9.92,15718,6.31123553,0.75725191,0.83343937,131,91,12923,2026-03-24,2026-03-24
+2026-03-24,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 6 Bald Care Set - Gifting - Img - AC.1 - LP.PDP - 1637708984256918",12.92,,,,3,4.30666667,2,6.46,2620,4.93129771,1.17454545,0.41984733,11,6,1617,2026-03-24,2026-03-24
+2026-03-24,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 2 Bald Care Set - Gifting - Img - AC.1 - LP.PDP -1637708960923587",2.92,,,,,,,,936,3.11965812,2.92,0.10683761,1,,662,2026-03-24,2026-03-24
+2026-03-24,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - V3 Richard Img - Bald Care Set - Img - AC1 - LP.PDP - 1664942914866858",1.81,1,62.05,1.81,,,,,332,5.45180723,1.81,0.30120482,1,1,232,2026-03-24,2026-03-24
+2026-03-24,"RX - Bald Boss - UK - M&F - Sales - CBO","1 DCT - Founders Story - Bald Boss - Broad - UK - All 18+ | AP - 23/1","7 DCT - 1 Founders Story - Bald Care Set - Img - 3AC - LP.PDP – Copy",2.64,,,,,,,,276,9.56521739,0.528,1.8115942,5,4,264,2026-03-24,2026-03-24
+2026-03-24,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V4 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",6.14,,,,,,,,1321,4.64799394,2.04666667,0.22710068,3,2,1079,2026-03-24,2026-03-24
+2026-03-24,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V2 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",13.5,,,,,,,,3306,4.08348457,0.79411765,0.51421658,17,7,2271,2026-03-24,2026-03-24
+2026-03-24,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V1 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",18.93,1,72.99,18.93,3,6.31,3,6.31,3702,5.11345219,1.262,0.40518639,15,9,2381,2026-03-24,2026-03-24
+2026-03-24,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V5 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",2.09,,,,,,,,656,3.18597561,0.34833333,0.91463415,6,3,520,2026-03-24,2026-03-24
+2026-03-24,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V4 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",1.73,,,,,,,,325,5.32307692,1.73,0.30769231,1,1,265,2026-03-24,2026-03-24
+2026-03-24,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V5 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",3.16,,,,,,,,882,3.58276644,1.58,0.22675737,2,,738,2026-03-24,2026-03-24
+2026-03-24,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V3 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",0.91,,,,,,,,316,2.87974684,,,,,277,2026-03-24,2026-03-24
+2026-03-24,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V1 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",5.55,,,,,,,,1448,3.83287293,0.69375,0.55248619,8,2,1044,2026-03-24,2026-03-24
+2026-03-24,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V2 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",0.15,,,,,,,,30,5,,,,,27,2026-03-24,2026-03-24
+2026-03-24,"RX - SPF50 - UK - M&F - Sales - CBO","1 DCT - Post Its - SPF50 - Broad - UK - All 18+ | AP - 2/3","1 DCT - 2 Post Its - SPF50 - Img - 2AC - LP.PDP",0.8,,,,,,,,73,10.95890411,0.26666667,4.10958904,3,1,73,2026-03-24,2026-03-24
+2026-03-24,"RX - SPF50 - UK - M&F - Sales - CBO","1 DCT - Post Its - SPF50 - Broad - UK - All 18+ | AP - 2/3","1 DCT - 3 Post Its - SPF50 - Img - 2AC - LP.PDP",0.01,,,,,,,,1,10,,,,,1,2026-03-24,2026-03-24
+2026-03-24,"RX - SPF50 - UK - M&F - Sales - CBO","2 DCT - Professional Img - SPF50 - Broad - UK - All 18+ | AP - 2/3","2 DCT - 2 Professional Img - SPF50 - Img - 2AC - LP.PDP",1.14,,,,,,,,127,8.97637795,0.57,1.57480315,2,3,109,2026-03-24,2026-03-24
+2026-03-24,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 10 DCT - 3 Newly Bald? Skincare Routine - Bald Care Set - Img - 2AC - LP.PDP - 1745039176857231",5.06,,,,,,,,1017,4.9754179,5.06,0.09832842,1,1,736,2026-03-24,2026-03-24
+2026-03-24,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 14 DCT - 2 Bald Man Skincare Routine - Bald Care Set - Img - 2AC - LP.PDP - 1745068416854307",14.21,2,116.54,7.105,2,7.105,3,4.73666667,2897,4.90507421,1.18416667,0.41422161,12,8,1735,2026-03-24,2026-03-24
+2026-03-24,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 1 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",0.12,,,,,,,,6,20,,,,,6,2026-03-24,2026-03-24
+2026-03-24,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 2 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",30.75,,,,,,,,2826,10.88110403,0.83108108,1.30927105,37,24,2142,2026-03-24,2026-03-24
+2026-03-24,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 5 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",0.11,,,,,,,,9,12.22222222,,,,,9,2026-03-24,2026-03-24
+2026-03-24,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 6 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",3.06,,,,,,,,235,13.0212766,1.02,1.27659574,3,2,175,2026-03-24,2026-03-24
+2026-03-25,"RX - Bald Boss - UK - M&F - Sales - CBO","Core - Bald Boss - Broad - UK - All 18+ | AP - 24/1","Expost - 112 ICT - 5 Iterations Before After - Bald Boss - Img - LP.PDP - 1639168760777607",21.94,,,,2,10.97,1,21.94,2270,9.66519824,1.37125,0.70484581,16,13,1971,2026-03-25,2026-03-25
+2026-03-25,"RX - Bald Boss - UK - M&F - Sales - CBO","Core - Bald Boss - Broad - UK - All 18+ | AP - 24/1","Expost - 110 DCT - Post it notes - Bald Boss - Img - AC.snowstorm - LP.PDP - 1599549518072865",15.71,,,,5,3.142,3,5.23666667,1362,11.53450808,1.12214286,1.02790015,14,13,1018,2026-03-25,2026-03-25
+2026-03-25,"RX - Bald Boss - UK - M&F - Sales - CBO","Core - Bald Boss - Broad - UK - All 18+ | AP - 24/1","Expost - DCT2 - Before After - Bald Boss - Img - AC.snowstorm - LP.PDP - 1627273965300420",94.51,5,113.26,18.902,11,8.59181818,7,13.50142857,15083,6.26599483,0.75608,0.8287476,125,77,13243,2026-03-25,2026-03-25
+2026-03-25,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 6 Bald Care Set - Gifting - Img - AC.1 - LP.PDP - 1637708984256918",13.62,1,38.97,13.62,3,4.54,1,13.62,2751,4.95092694,0.97285714,0.50890585,14,7,1684,2026-03-25,2026-03-25
+2026-03-25,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 2 Bald Care Set - Gifting - Img - AC.1 - LP.PDP -1637708960923587",2.98,1,47.97,2.98,1,2.98,2,1.49,843,3.53499407,2.98,0.11862396,1,,595,2026-03-25,2026-03-25
+2026-03-25,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - V3 Richard Img - Bald Care Set - Img - AC1 - LP.PDP - 1664942914866858",4.31,,,,,,2,2.155,707,6.09618105,0.61571429,0.99009901,7,3,474,2026-03-25,2026-03-25
+2026-03-25,"RX - Bald Boss - UK - M&F - Sales - CBO","1 DCT - Founders Story - Bald Boss - Broad - UK - All 18+ | AP - 23/1","7 DCT - 1 Founders Story - Bald Care Set - Img - 3AC - LP.PDP – Copy",7.45,,,,,,,,659,11.30500759,1.49,0.75872534,5,1,607,2026-03-25,2026-03-25
+2026-03-25,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V4 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",3.25,,,,,,,,749,4.33911883,1.08333333,0.40053405,3,3,612,2026-03-25,2026-03-25
+2026-03-25,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V2 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",9.72,,,,,,,,2930,3.31740614,1.38857143,0.23890785,7,1,1989,2026-03-25,2026-03-25
+2026-03-25,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V1 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",18.46,1,22.58,18.46,1,18.46,3,6.15333333,3652,5.05476451,0.65928571,0.76670318,28,22,2377,2026-03-25,2026-03-25
+2026-03-25,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","23 DCT - Only Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","23 DCT - V5 Only Before After - Bald Care Set - Img - 2AC - LP.PDP",2.11,,,,,,,,566,3.72791519,0.70333333,0.53003534,3,2,461,2026-03-25,2026-03-25
+2026-03-25,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V4 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",1.24,,,,,,,,187,6.63101604,0.62,1.06951872,2,,157,2026-03-25,2026-03-25
+2026-03-25,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V5 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",0.88,,,,,,,,291,3.02405498,,,,,237,2026-03-25,2026-03-25
+2026-03-25,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V3 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",1.2,,,,1,1.2,1,1.2,400,3,0.4,0.75,3,1,331,2026-03-25,2026-03-25
+2026-03-25,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V1 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",2.87,,,,,,,,786,3.65139949,2.87,0.12722646,1,1,490,2026-03-25,2026-03-25
+2026-03-25,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","24 DCT - Review Headline Before After - Bald Care Set - Broad - UK - All 18+ | AP - 1/3","24 DCT - V2 Review Headline Before After - Bald Care Set - Img - 2AC - LP.PDP",0.14,,,,,,,,57,2.45614035,,,,,54,2026-03-25,2026-03-25
+2026-03-25,"RX - SPF50 - UK - M&F - Sales - CBO","1 DCT - Post Its - SPF50 - Broad - UK - All 18+ | AP - 2/3","1 DCT - 2 Post Its - SPF50 - Img - 2AC - LP.PDP",0.6,,,,,,,,48,12.5,,,,,47,2026-03-25,2026-03-25
+2026-03-25,"RX - SPF50 - UK - M&F - Sales - CBO","1 DCT - Post Its - SPF50 - Broad - UK - All 18+ | AP - 2/3","1 DCT - 3 Post Its - SPF50 - Img - 2AC - LP.PDP",0.06,,,,,,,,7,8.57142857,,,,,7,2026-03-25,2026-03-25
+2026-03-25,"RX - SPF50 - UK - M&F - Sales - CBO","1 DCT - Post Its - SPF50 - Broad - UK - All 18+ | AP - 2/3","1 DCT - 4 Post Its - SPF50 - Img - 2AC - LP.PDP",0.05,,,,,,,,4,12.5,,,,,4,2026-03-25,2026-03-25
+2026-03-25,"RX - SPF50 - UK - M&F - Sales - CBO","2 DCT - Professional Img - SPF50 - Broad - UK - All 18+ | AP - 2/3","2 DCT - 5 Professional Img - SPF50 - Img - 2AC - LP.PDP",0.11,,,,,,,,13,8.46153846,,,,,11,2026-03-25,2026-03-25
+2026-03-25,"RX - SPF50 - UK - M&F - Sales - CBO","2 DCT - Professional Img - SPF50 - Broad - UK - All 18+ | AP - 2/3","2 DCT - 2 Professional Img - SPF50 - Img - 2AC - LP.PDP",18.1,1,26.98,18.1,4,4.525,2,9.05,1783,10.15143017,0.95263158,1.06561974,19,15,1448,2026-03-25,2026-03-25
+2026-03-25,"RX - SPF50 - UK - M&F - Sales - CBO","2 DCT - Professional Img - SPF50 - Broad - UK - All 18+ | AP - 2/3","2 DCT - 3 Professional Img - SPF50 - Img - 2AC - LP.PDP",0.02,,,,,,,,1,20,,,,,1,2026-03-25,2026-03-25
+2026-03-25,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 10 DCT - 3 Newly Bald? Skincare Routine - Bald Care Set - Img - 2AC - LP.PDP - 1745039176857231",3.76,,,,,,,,704,5.34090909,0.94,0.56818182,4,2,525,2026-03-25,2026-03-25
+2026-03-25,"RX - Bald Care Gift Set - UK - M&F - Sales - CBO","Core -Bald Care Gift Set - Broad - UK - W 18+ | AP - 27/1","Expost - 14 DCT - 2 Bald Man Skincare Routine - Bald Care Set - Img - 2AC - LP.PDP - 1745068416854307",14.48,,,,,,,,2859,5.06470794,0.68952381,0.73452256,21,18,1702,2026-03-25,2026-03-25
+2026-03-25,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 1 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",0,,,,,,,,1,0,,,,,1,2026-03-25,2026-03-25
+2026-03-25,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 3 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",0.03,,,,,,,,4,7.5,,,,,4,2026-03-25,2026-03-25
+2026-03-25,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 2 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",21.18,1,80.75,21.18,3,7.06,1,21.18,1917,11.0485133,1.32375,0.83463745,16,13,1497,2026-03-25,2026-03-25
+2026-03-25,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 5 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",0.21,,,,,,,,17,12.35294118,,,,,17,2026-03-25,2026-03-25
+2026-03-25,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 6 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",1.54,,,,,,,,124,12.41935484,,,,,104,2026-03-25,2026-03-25
+2026-03-25,"RX - SPF50 - UK - M&F - Sales - CBO","3 DCT - Problem Questions Img - SPF50 - Broad - UK - All 18+ | AP - 14/3","3 DCT - 4 Problem Question Img - SPF50 - Img - 2AC - LP.PDP",0.01,,,,,,,,1,10,,,,,1,2026-03-25,2026-03-25`;
+
+function parseCSV(text) {
+  const lines = text.trim().split('\n');
+  const headers = parseCSVLine(lines[0]);
+  return lines.slice(1).filter(l => l.trim()).map(line => {
+    const vals = parseCSVLine(line);
+    const obj = {};
+    headers.forEach((h, i) => obj[h] = vals[i] || '');
+    return obj;
+  });
+}
+
+function parseCSVLine(line) {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"' && line[i+1] === '"') { current += '"'; i++; }
+      else if (ch === '"') { inQuotes = false; }
+      else { current += ch; }
+    } else {
+      if (ch === '"') { inQuotes = true; }
+      else if (ch === ',') { result.push(current); current = ''; }
+      else { current += ch; }
+    }
+  }
+  result.push(current);
+  return result;
+}
+
+function num(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n; }
+function gbp(v) { return '£' + v.toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
+function fmt(v) { return v.toLocaleString('en-GB'); }
+function pct(v) { return v.toFixed(2) + 'x'; }
+function shortName(n) { return n.length > 50 ? n.substring(0, 47) + '...' : n; }
+
+// Parse data
+const rows = parseCSV(csvText);
+
+// Summary
+const totalSpend = rows.reduce((s, r) => s + num(r['Amount spent (GBP)']), 0);
+const totalPurchases = rows.reduce((s, r) => s + num(r['Purchases']), 0);
+const totalRevenue = rows.reduce((s, r) => s + num(r['Purchases conversion value']), 0);
+const roas = totalRevenue / totalSpend;
+const avgCPP = totalSpend / totalPurchases;
+
+const dates = [...new Set(rows.map(r => r['Day']))].sort();
+document.getElementById('dateRange').textContent = `${dates[0]} to ${dates[dates.length-1]} · ${rows.length} ad entries · ${dates.length} days`;
+
+document.getElementById('summaryCards').innerHTML = [
+  { label: 'Total Spend', value: gbp(totalSpend), cls: '' },
+  { label: 'Total Purchases', value: fmt(totalPurchases), cls: 'green' },
+  { label: 'Total Revenue', value: gbp(totalRevenue), cls: 'green' },
+  { label: 'ROAS', value: pct(roas), cls: 'purple' },
+  { label: 'Avg Cost per Purchase', value: gbp(avgCPP), cls: 'orange' },
+].map(c => `<div class="card"><div class="label">${c.label}</div><div class="value ${c.cls}">${c.value}</div></div>`).join('');
+
+// Daily trend data
+const dailyData = {};
+dates.forEach(d => dailyData[d] = { spend: 0, revenue: 0 });
+rows.forEach(r => {
+  dailyData[r['Day']].spend += num(r['Amount spent (GBP)']);
+  dailyData[r['Day']].revenue += num(r['Purchases conversion value']);
+});
+
+// Draw trend chart
+function drawChart() {
+  const canvas = document.getElementById('trendChart');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+  const W = rect.width, H = rect.height;
+  const pad = { top: 30, right: 20, bottom: 50, left: 70 };
+  const cw = W - pad.left - pad.right;
+  const ch = H - pad.top - pad.bottom;
+
+  const spends = dates.map(d => dailyData[d].spend);
+  const revs = dates.map(d => dailyData[d].revenue);
+  const maxVal = Math.max(...spends, ...revs) * 1.1;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Grid lines
+  ctx.strokeStyle = '#21262d';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.top + ch - (ch * i / 4);
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+    ctx.fillStyle = '#8b949e'; ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText('£' + Math.round(maxVal * i / 4).toLocaleString(), pad.left - 8, y + 4);
+  }
+
+  // X labels
+  ctx.fillStyle = '#8b949e'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+  dates.forEach((d, i) => {
+    const x = pad.left + (cw * i / (dates.length - 1));
+    ctx.fillText(d.substring(5), x, H - pad.bottom + 20);
+  });
+
+  function drawLine(data, color) {
+    ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    data.forEach((v, i) => {
+      const x = pad.left + (cw * i / (dates.length - 1));
+      const y = pad.top + ch - (ch * v / maxVal);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    // Dots
+    data.forEach((v, i) => {
+      const x = pad.left + (cw * i / (dates.length - 1));
+      const y = pad.top + ch - (ch * v / maxVal);
+      ctx.fillStyle = color; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
+    });
+  }
+
+  drawLine(spends, '#f85149');
+  drawLine(revs, '#3fb950');
+
+  // Legend
+  ctx.font = '12px sans-serif';
+  const lx = pad.left + 10;
+  ctx.fillStyle = '#f85149'; ctx.fillRect(lx, pad.top - 20, 14, 3);
+  ctx.fillStyle = '#c9d1d9'; ctx.textAlign = 'left'; ctx.fillText('Spend', lx + 20, pad.top - 14);
+  ctx.fillStyle = '#3fb950'; ctx.fillRect(lx + 80, pad.top - 20, 14, 3);
+  ctx.fillStyle = '#c9d1d9'; ctx.fillText('Revenue', lx + 100, pad.top - 14);
+}
+drawChart();
+window.addEventListener('resize', drawChart);
+
+// Campaign breakdown
+const campaigns = {};
+rows.forEach(r => {
+  const c = r['Campaign name'];
+  if (!campaigns[c]) campaigns[c] = { spend: 0, purchases: 0, revenue: 0, impressions: 0, clicks: 0, atc: 0, checkouts: 0 };
+  campaigns[c].spend += num(r['Amount spent (GBP)']);
+  campaigns[c].purchases += num(r['Purchases']);
+  campaigns[c].revenue += num(r['Purchases conversion value']);
+  campaigns[c].impressions += num(r['Impressions']);
+  campaigns[c].clicks += num(r['Link clicks']);
+  campaigns[c].atc += num(r['Adds to cart']);
+  campaigns[c].checkouts += num(r['Checkouts initiated']);
+});
+
+const campRows = Object.entries(campaigns).sort((a, b) => b[1].spend - a[1].spend);
+document.getElementById('campaignTable').innerHTML = `
+  <thead><tr><th>Campaign</th><th class="num">Spend</th><th class="num">Purchases</th><th class="num">Revenue</th><th class="num">ROAS</th><th class="num">Cost/Purchase</th></tr></thead>
+  <tbody>${campRows.map(([name, d]) => {
+    const r = d.revenue / d.spend;
+    const cpp = d.purchases > 0 ? d.spend / d.purchases : 0;
+    return `<tr>
+      <td>${name}</td>
+      <td class="num">${gbp(d.spend)}</td>
+      <td class="num">${d.purchases}</td>
+      <td class="num">${gbp(d.revenue)}</td>
+      <td class="num ${r >= 1 ? 'good' : 'bad'}">${pct(r)}</td>
+      <td class="num">${d.purchases > 0 ? gbp(cpp) : '—'}</td>
+    </tr>`;
+  }).join('')}</tbody>`;
+
+// Aggregate ads
+const ads = {};
+rows.forEach(r => {
+  const key = r['Ad name'];
+  if (!ads[key]) ads[key] = { name: key, campaign: r['Campaign name'], spend: 0, purchases: 0, revenue: 0 };
+  ads[key].spend += num(r['Amount spent (GBP)']);
+  ads[key].purchases += num(r['Purchases']);
+  ads[key].revenue += num(r['Purchases conversion value']);
+});
+
+// Top 5 by ROAS (min £5 spend, >=1 purchase)
+const qualified = Object.values(ads).filter(a => a.spend >= 5 && a.purchases >= 1);
+const topByROAS = [...qualified].sort((a, b) => (b.revenue / b.spend) - (a.revenue / a.spend)).slice(0, 5);
+
+document.getElementById('topAdsTable').innerHTML = `
+  <thead><tr><th>Ad Name</th><th class="num">Spend</th><th class="num">Purchases</th><th class="num">Revenue</th><th class="num">ROAS</th></tr></thead>
+  <tbody>${topByROAS.map(a => `<tr>
+    <td class="ad-name" title="${a.name}">${shortName(a.name)}</td>
+    <td class="num">${gbp(a.spend)}</td>
+    <td class="num">${a.purchases}</td>
+    <td class="num">${gbp(a.revenue)}</td>
+    <td class="num good">${pct(a.revenue / a.spend)}</td>
+  </tr>`).join('')}</tbody>`;
+
+// Bottom 5 by cost per purchase (worst = highest CPP, >=1 purchase)
+const withPurchases = Object.values(ads).filter(a => a.purchases >= 1);
+const bottomByCPP = [...withPurchases].sort((a, b) => (b.spend / b.purchases) - (a.spend / a.purchases)).slice(0, 5);
+
+document.getElementById('bottomAdsTable').innerHTML = `
+  <thead><tr><th>Ad Name</th><th class="num">Spend</th><th class="num">Purchases</th><th class="num">Cost/Purchase</th></tr></thead>
+  <tbody>${bottomByCPP.map(a => `<tr>
+    <td class="ad-name" title="${a.name}">${shortName(a.name)}</td>
+    <td class="num">${gbp(a.spend)}</td>
+    <td class="num">${a.purchases}</td>
+    <td class="num bad">${gbp(a.spend / a.purchases)}</td>
+  </tr>`).join('')}</tbody>`;
+
+// Funnel by campaign
+const funnelHTML = campRows.map(([name, d]) => {
+  const steps = [
+    { label: 'Impressions', val: d.impressions, cls: 'c0' },
+    { label: 'Link Clicks', val: d.clicks, cls: 'c1' },
+    { label: 'Add to Cart', val: d.atc, cls: 'c2' },
+    { label: 'Checkout Init', val: d.checkouts, cls: 'c3' },
+    { label: 'Purchase', val: d.purchases, cls: 'c4' },
+  ];
+  const maxStep = steps[0].val || 1;
+  return `<div class="funnel-card"><h3>${name}</h3>${steps.map(s => {
+    const pctW = Math.max((s.val / maxStep) * 100, 0.5);
+    return `<div class="funnel-bar-wrap">
+      <div class="funnel-label">${s.label}</div>
+      <div class="funnel-bar-bg"><div class="funnel-bar ${s.cls}" style="width:${pctW}%">${pctW > 8 ? fmt(s.val) : ''}</div></div>
+      <div class="funnel-val">${fmt(s.val)}</div>
+    </div>`;
+  }).join('')}</div>`;
+}).join('');
+document.getElementById('funnelGrid').innerHTML = funnelHTML;
+</script>
+</body>
+</html>

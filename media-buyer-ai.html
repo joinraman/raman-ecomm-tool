@@ -155,13 +155,150 @@ When answering questions:
 - Think in terms of budget efficiency — where is money being wasted and where should it go instead
 - Always end with a prioritised action list: do this today, do this this week`;
 
-// Aggressive sanitisation: replace GBP sign, then strip ALL non-ASCII
-function sanitizeText(text) {
-  // Replace £ with GBP before stripping non-ASCII
-  text = text.replace(/\u00A3/g, 'GBP');
-  // Remove everything outside printable ASCII (codes 32-126) plus newline/tab/carriage return
-  text = text.replace(/[^\x09\x0A\x0D\x20-\x7E]/g, '');
-  return text;
+// Strip string to plain ASCII alphanumeric + spaces only
+function safeName(str) {
+  if (!str) return '';
+  return str.replace(/[^A-Za-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 40);
+}
+
+function n(v) { const x = parseFloat(v); return isNaN(x) ? 0 : x; }
+function r2(v) { return Math.round(v * 100) / 100; }
+
+// Build a clean structured JSON object from parsed CSV — numbers and safe ASCII strings only
+function buildCleanData() {
+  if (!csvData) return null;
+  const { rows } = csvData;
+
+  // Aggregate by campaign
+  const campMap = {};
+  rows.forEach(row => {
+    const c = safeName(row['Campaign name']) || 'Unknown Campaign';
+    if (!campMap[c]) campMap[c] = { spend: 0, purchases: 0, revenue: 0, impressions: 0, clicks: 0, atc: 0, checkouts: 0, reach: 0 };
+    campMap[c].spend += n(row['Amount spent (GBP)']);
+    campMap[c].purchases += n(row['Purchases']);
+    campMap[c].revenue += n(row['Purchases conversion value']);
+    campMap[c].impressions += n(row['Impressions']);
+    campMap[c].clicks += n(row['Link clicks']);
+    campMap[c].atc += n(row['Adds to cart']);
+    campMap[c].checkouts += n(row['Checkouts initiated']);
+    campMap[c].reach += n(row['Reach']);
+  });
+
+  // Aggregate by ad set
+  const adSetMap = {};
+  rows.forEach(row => {
+    const key = safeName(row['Ad set name']) || 'Unknown Ad Set';
+    if (!adSetMap[key]) adSetMap[key] = { campaign: safeName(row['Campaign name']), spend: 0, purchases: 0, revenue: 0, impressions: 0, clicks: 0 };
+    adSetMap[key].spend += n(row['Amount spent (GBP)']);
+    adSetMap[key].purchases += n(row['Purchases']);
+    adSetMap[key].revenue += n(row['Purchases conversion value']);
+    adSetMap[key].impressions += n(row['Impressions']);
+    adSetMap[key].clicks += n(row['Link clicks']);
+  });
+
+  // Aggregate by ad
+  const adMap = {};
+  let adCounter = 0;
+  rows.forEach(row => {
+    const rawName = row['Ad name'] || '';
+    const key = rawName;
+    if (!adMap[key]) {
+      adCounter++;
+      adMap[key] = {
+        id: 'Ad ' + adCounter,
+        shortName: safeName(rawName).substring(0, 20) || ('Ad ' + adCounter),
+        campaign: safeName(row['Campaign name']),
+        adSet: safeName(row['Ad set name']),
+        spend: 0, purchases: 0, revenue: 0, impressions: 0, clicks: 0, atc: 0, checkouts: 0
+      };
+    }
+    adMap[key].spend += n(row['Amount spent (GBP)']);
+    adMap[key].purchases += n(row['Purchases']);
+    adMap[key].revenue += n(row['Purchases conversion value']);
+    adMap[key].impressions += n(row['Impressions']);
+    adMap[key].clicks += n(row['Link clicks']);
+    adMap[key].atc += n(row['Adds to cart']);
+    adMap[key].checkouts += n(row['Checkouts initiated']);
+  });
+
+  // Daily totals
+  const dailyMap = {};
+  rows.forEach(row => {
+    const day = (row['Day'] || '').replace(/[^0-9-]/g, '');
+    if (!day) return;
+    if (!dailyMap[day]) dailyMap[day] = { spend: 0, revenue: 0, purchases: 0 };
+    dailyMap[day].spend += n(row['Amount spent (GBP)']);
+    dailyMap[day].revenue += n(row['Purchases conversion value']);
+    dailyMap[day].purchases += n(row['Purchases']);
+  });
+
+  // Totals
+  const totalSpend = Object.values(campMap).reduce((s, c) => s + c.spend, 0);
+  const totalRevenue = Object.values(campMap).reduce((s, c) => s + c.revenue, 0);
+  const totalPurchases = Object.values(campMap).reduce((s, c) => s + c.purchases, 0);
+
+  const dates = Object.keys(dailyMap).sort();
+
+  // Build the clean object
+  const data = {
+    reportPeriod: dates.length > 0 ? (dates[0] + ' to ' + dates[dates.length - 1]) : 'Unknown',
+    totalRows: rows.length,
+    totals: {
+      spend: r2(totalSpend),
+      revenue: r2(totalRevenue),
+      purchases: totalPurchases,
+      roas: r2(totalSpend > 0 ? totalRevenue / totalSpend : 0),
+      avgCpp: r2(totalPurchases > 0 ? totalSpend / totalPurchases : 0)
+    },
+    campaigns: Object.entries(campMap).map(([name, d]) => ({
+      name: name,
+      spend: r2(d.spend),
+      purchases: d.purchases,
+      revenue: r2(d.revenue),
+      roas: r2(d.spend > 0 ? d.revenue / d.spend : 0),
+      cpp: r2(d.purchases > 0 ? d.spend / d.purchases : 0),
+      impressions: d.impressions,
+      clicks: d.clicks,
+      ctr: r2(d.impressions > 0 ? (d.clicks / d.impressions) * 100 : 0),
+      cpm: r2(d.impressions > 0 ? (d.spend / d.impressions) * 1000 : 0),
+      atc: d.atc,
+      checkouts: d.checkouts,
+      reach: d.reach
+    })),
+    adSets: Object.entries(adSetMap).sort((a, b) => b[1].spend - a[1].spend).map(([name, d]) => ({
+      name: name,
+      campaign: d.campaign,
+      spend: r2(d.spend),
+      purchases: d.purchases,
+      revenue: r2(d.revenue),
+      roas: r2(d.spend > 0 ? d.revenue / d.spend : 0),
+      cpp: r2(d.purchases > 0 ? d.spend / d.purchases : 0),
+      ctr: r2(d.impressions > 0 ? (d.clicks / d.impressions) * 100 : 0)
+    })),
+    ads: Object.values(adMap).sort((a, b) => b.spend - a.spend).map(d => ({
+      id: d.id,
+      name: d.shortName,
+      campaign: d.campaign,
+      adSet: d.adSet,
+      spend: r2(d.spend),
+      purchases: d.purchases,
+      revenue: r2(d.revenue),
+      roas: r2(d.spend > 0 ? d.revenue / d.spend : 0),
+      cpp: r2(d.purchases > 0 ? d.spend / d.purchases : 0),
+      ctr: r2(d.impressions > 0 ? (d.clicks / d.impressions) * 100 : 0),
+      atc: d.atc,
+      checkouts: d.checkouts
+    })),
+    dailyTotals: dates.map(day => ({
+      date: day,
+      spend: r2(dailyMap[day].spend),
+      revenue: r2(dailyMap[day].revenue),
+      purchases: dailyMap[day].purchases,
+      roas: r2(dailyMap[day].spend > 0 ? dailyMap[day].revenue / dailyMap[day].spend : 0)
+    }))
+  };
+
+  return data;
 }
 
 // CSV parsing
@@ -186,148 +323,19 @@ function parseCSVLine(line) {
 }
 
 function parseCSV(text) {
-  // Sanitise the entire CSV text before parsing
-  text = sanitizeText(text);
   const lines = text.trim().split('\n');
-  const headers = parseCSVLine(lines[0]).map(h => sanitizeText(h));
+  const headers = parseCSVLine(lines[0]);
   const rows = [];
   for (let i = 1; i < lines.length; i++) {
     if (!lines[i].trim()) continue;
     const vals = parseCSVLine(lines[i]);
     const obj = {};
-    // Sanitise every individual cell value
-    headers.forEach((h, idx) => obj[h] = sanitizeText(vals[idx] || ''));
+    headers.forEach((h, idx) => obj[h] = vals[idx] || '');
     rows.push(obj);
   }
   return { headers, rows };
 }
 
-const DATA_CHAR_LIMIT = 50000;
-
-function buildDataSummary() {
-  if (!csvData) return '';
-  const { headers, rows } = csvData;
-  const num = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
-
-  // Aggregate by campaign
-  const campaigns = {};
-  rows.forEach(r => {
-    const c = r['Campaign name'];
-    if (!campaigns[c]) campaigns[c] = { spend: 0, purchases: 0, revenue: 0, impressions: 0, clicks: 0, atc: 0, checkouts: 0, reach: 0 };
-    campaigns[c].spend += num(r['Amount spent (GBP)']);
-    campaigns[c].purchases += num(r['Purchases']);
-    campaigns[c].revenue += num(r['Purchases conversion value']);
-    campaigns[c].impressions += num(r['Impressions']);
-    campaigns[c].clicks += num(r['Link clicks']);
-    campaigns[c].atc += num(r['Adds to cart']);
-    campaigns[c].checkouts += num(r['Checkouts initiated']);
-    campaigns[c].reach += num(r['Reach']);
-  });
-
-  // Aggregate by ad set
-  const adSets = {};
-  rows.forEach(r => {
-    const key = r['Ad set name'];
-    if (!adSets[key]) adSets[key] = { campaign: r['Campaign name'], spend: 0, purchases: 0, revenue: 0, impressions: 0, clicks: 0 };
-    adSets[key].spend += num(r['Amount spent (GBP)']);
-    adSets[key].purchases += num(r['Purchases']);
-    adSets[key].revenue += num(r['Purchases conversion value']);
-    adSets[key].impressions += num(r['Impressions']);
-    adSets[key].clicks += num(r['Link clicks']);
-  });
-
-  // Aggregate by ad
-  const ads = {};
-  rows.forEach(r => {
-    const key = r['Ad name'];
-    if (!ads[key]) ads[key] = { campaign: r['Campaign name'], adSet: r['Ad set name'], spend: 0, purchases: 0, revenue: 0, impressions: 0, clicks: 0, atc: 0, checkouts: 0 };
-    ads[key].spend += num(r['Amount spent (GBP)']);
-    ads[key].purchases += num(r['Purchases']);
-    ads[key].revenue += num(r['Purchases conversion value']);
-    ads[key].impressions += num(r['Impressions']);
-    ads[key].clicks += num(r['Link clicks']);
-    ads[key].atc += num(r['Adds to cart']);
-    ads[key].checkouts += num(r['Checkouts initiated']);
-  });
-
-  // Daily trends
-  const daily = {};
-  rows.forEach(r => {
-    const day = r['Day'];
-    if (!daily[day]) daily[day] = { spend: 0, revenue: 0, purchases: 0 };
-    daily[day].spend += num(r['Amount spent (GBP)']);
-    daily[day].revenue += num(r['Purchases conversion value']);
-    daily[day].purchases += num(r['Purchases']);
-  });
-
-  // Totals
-  const totalSpend = Object.values(campaigns).reduce((s, c) => s + c.spend, 0);
-  const totalRevenue = Object.values(campaigns).reduce((s, c) => s + c.revenue, 0);
-  const totalPurchases = Object.values(campaigns).reduce((s, c) => s + c.purchases, 0);
-
-  // Helper to format campaign line
-  function campLine(name, d) {
-    const roas = d.spend > 0 ? (d.revenue / d.spend).toFixed(2) : '0';
-    const cpp = d.purchases > 0 ? (d.spend / d.purchases).toFixed(2) : 'N/A';
-    const ctr = d.impressions > 0 ? ((d.clicks / d.impressions) * 100).toFixed(2) : '0';
-    const cpm = d.impressions > 0 ? ((d.spend / d.impressions) * 1000).toFixed(2) : '0';
-    const cpc = d.clicks > 0 ? (d.spend / d.clicks).toFixed(2) : 'N/A';
-    return `${name}: Spend £${d.spend.toFixed(2)}, Revenue £${d.revenue.toFixed(2)}, ROAS ${roas}x, Purchases ${d.purchases}, CPP £${cpp}, Impressions ${d.impressions}, Clicks ${d.clicks}, CTR ${ctr}%, CPM £${cpm}, CPC £${cpc}, ATC ${d.atc}, Checkouts ${d.checkouts}, Reach ${d.reach}\n`;
-  }
-
-  // Always include: totals, campaigns, ad sets, daily trends
-  let summary = `META ADS DATA (${rows.length} rows)\n\n`;
-  summary += `TOTALS: Spend £${totalSpend.toFixed(2)}, Revenue £${totalRevenue.toFixed(2)}, ROAS ${(totalRevenue/totalSpend).toFixed(2)}x, Purchases ${totalPurchases}, Avg CPP £${(totalSpend/totalPurchases).toFixed(2)}\n\n`;
-
-  summary += 'CAMPAIGN SUMMARY:\n';
-  Object.entries(campaigns).forEach(([name, d]) => { summary += campLine(name, d); });
-
-  summary += '\nAD SET SUMMARY:\n';
-  Object.entries(adSets).sort((a, b) => b[1].spend - a[1].spend).forEach(([name, d]) => {
-    const roas = d.spend > 0 ? (d.revenue / d.spend).toFixed(2) : '0';
-    const cpp = d.purchases > 0 ? (d.spend / d.purchases).toFixed(2) : 'N/A';
-    const ctr = d.impressions > 0 ? ((d.clicks / d.impressions) * 100).toFixed(2) : '0';
-    summary += `[${d.campaign}] ${name}: Spend £${d.spend.toFixed(2)}, Revenue £${d.revenue.toFixed(2)}, ROAS ${roas}x, Purchases ${d.purchases}, CPP £${cpp}, CTR ${ctr}%\n`;
-  });
-
-  summary += '\nDAILY TRENDS:\n';
-  Object.keys(daily).sort().forEach(day => {
-    const d = daily[day];
-    const roas = d.spend > 0 ? (d.revenue / d.spend).toFixed(2) : '0';
-    summary += `${day}: Spend £${d.spend.toFixed(2)}, Revenue £${d.revenue.toFixed(2)}, ROAS ${roas}x, Purchases ${d.purchases}\n`;
-  });
-
-  // Only add ad-level detail if within character limit
-  if (summary.length < DATA_CHAR_LIMIT) {
-    let adSection = '\nAD-LEVEL DETAIL:\n';
-    Object.entries(ads).sort((a, b) => b[1].spend - a[1].spend).forEach(([name, d]) => {
-      const roas = d.spend > 0 ? (d.revenue / d.spend).toFixed(2) : '0';
-      const cpp = d.purchases > 0 ? (d.spend / d.purchases).toFixed(2) : 'N/A';
-      const ctr = d.impressions > 0 ? ((d.clicks / d.impressions) * 100).toFixed(2) : '0';
-      adSection += `${name}: Spend £${d.spend.toFixed(2)}, Revenue £${d.revenue.toFixed(2)}, ROAS ${roas}x, Purchases ${d.purchases}, CPP £${cpp}, CTR ${ctr}%, Impressions ${d.impressions}, ATC ${d.atc}, Checkouts ${d.checkouts}\n`;
-    });
-
-    if (summary.length + adSection.length <= DATA_CHAR_LIMIT) {
-      summary += adSection;
-    } else {
-      // Include only top ads by spend that fit
-      summary += '\nAD-LEVEL DETAIL (top ads by spend, truncated to fit):\n';
-      const sortedAds = Object.entries(ads).sort((a, b) => b[1].spend - a[1].spend);
-      for (const [name, d] of sortedAds) {
-        const roas = d.spend > 0 ? (d.revenue / d.spend).toFixed(2) : '0';
-        const cpp = d.purchases > 0 ? (d.spend / d.purchases).toFixed(2) : 'N/A';
-        const ctr = d.impressions > 0 ? ((d.clicks / d.impressions) * 100).toFixed(2) : '0';
-        const line = `${name}: Spend £${d.spend.toFixed(2)}, Revenue £${d.revenue.toFixed(2)}, ROAS ${roas}x, Purchases ${d.purchases}, CPP £${cpp}, CTR ${ctr}%\n`;
-        if (summary.length + line.length > DATA_CHAR_LIMIT) break;
-        summary += line;
-      }
-    }
-  } else {
-    summary += '\n(Ad-level detail omitted - data aggregated at campaign/ad set level to fit size limit)\n';
-  }
-
-  return summary;
-}
 
 // CSV upload handler
 document.getElementById('csvFile').addEventListener('change', function(e) {
@@ -439,42 +447,33 @@ async function sendMessage() {
   showTyping();
 
   try {
-    // Build messages: first message includes data context
+    // Build clean structured data object (numbers + safe ASCII only)
+    const cleanData = buildCleanData();
+    const dataJson = JSON.stringify(cleanData);
+    console.log('[Media Buyer AI] Clean data preview (first 500 chars):', dataJson.substring(0, 500));
+    console.log('[Media Buyer AI] Clean data size:', dataJson.length, 'chars');
+
+    // Build messages: first message includes structured data context
     const messages = [];
     conversationHistory.forEach((msg, i) => {
       if (i === 0 && msg.role === 'user') {
         messages.push({
           role: 'user',
-          content: `Here is my Meta Ads data:\n\n${buildDataSummary()}\n\nMy question: ${msg.content}`
+          content: 'Here is my Meta Ads data as structured JSON (all currency in GBP):\n\n' + dataJson + '\n\nMy question: ' + msg.content
         });
       } else {
-        messages.push(msg);
+        messages.push({ role: msg.role, content: msg.content });
       }
     });
 
-    // Sanitise all message content one final time before JSON encoding
-    messages.forEach(m => { m.content = sanitizeText(m.content); });
-
-    // Build request body and validate JSON before sending
+    // Build request body — all values are numbers or safe ASCII strings from buildCleanData
     const requestBody = {
       model: 'claude-sonnet-4-20250514',
       max_tokens: 2048,
-      system: sanitizeText(SYSTEM_PROMPT),
+      system: SYSTEM_PROMPT,
       messages: messages,
     };
-    let bodyJson;
-    try {
-      bodyJson = JSON.stringify(requestBody);
-      // Validate roundtrip: parse it back to catch encoding issues
-      JSON.parse(bodyJson);
-    } catch (jsonErr) {
-      console.error('[Media Buyer AI] JSON validation failed:', jsonErr);
-      console.error('[Media Buyer AI] First 500 chars of body:', bodyJson?.substring(0, 500));
-      throw new Error('Failed to build valid JSON request. Your CSV may contain unsupported characters. Try re-exporting your CSV as UTF-8.');
-    }
-
-    // Debug: log first 500 chars of sanitised data being sent
-    console.log('[Media Buyer AI] Request body preview (first 500 chars):', bodyJson.substring(0, 500));
+    const bodyJson = JSON.stringify(requestBody);
     console.log('[Media Buyer AI] Total request size:', bodyJson.length, 'chars');
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {

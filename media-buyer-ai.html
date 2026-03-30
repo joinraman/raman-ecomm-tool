@@ -155,24 +155,13 @@ When answering questions:
 - Think in terms of budget efficiency — where is money being wasted and where should it go instead
 - Always end with a prioritised action list: do this today, do this this week`;
 
-// Sanitise text: replace non-ASCII chars (em dashes, curly quotes, etc.) with safe equivalents
+// Aggressive sanitisation: replace GBP sign, then strip ALL non-ASCII
 function sanitizeText(text) {
-  return text
-    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")   // curly single quotes
-    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')    // curly double quotes
-    .replace(/[\u2013\u2014\u2015]/g, '-')           // en/em dashes
-    .replace(/\u2026/g, '...')                        // ellipsis
-    .replace(/[\u00A0]/g, ' ')                        // non-breaking space
-    .replace(/[\uFFFD\uFEFF]/g, '')                   // BOM / replacement char
-    // Strip any remaining non-ASCII that could cause surrogate issues
-    .replace(/[^\x00-\x7F]/g, function(ch) {
-      // Keep £ sign and common accented chars
-      if (ch === '\u00A3') return '\u00A3'; // £
-      const code = ch.charCodeAt(0);
-      // Keep basic Latin supplement (accents etc)
-      if (code >= 0x00A0 && code <= 0x00FF) return ch;
-      return '';
-    });
+  // Replace £ with GBP before stripping non-ASCII
+  text = text.replace(/\u00A3/g, 'GBP');
+  // Remove everything outside printable ASCII (codes 32-126) plus newline/tab/carriage return
+  text = text.replace(/[^\x09\x0A\x0D\x20-\x7E]/g, '');
+  return text;
 }
 
 // CSV parsing
@@ -200,13 +189,14 @@ function parseCSV(text) {
   // Sanitise the entire CSV text before parsing
   text = sanitizeText(text);
   const lines = text.trim().split('\n');
-  const headers = parseCSVLine(lines[0]);
+  const headers = parseCSVLine(lines[0]).map(h => sanitizeText(h));
   const rows = [];
   for (let i = 1; i < lines.length; i++) {
     if (!lines[i].trim()) continue;
     const vals = parseCSVLine(lines[i]);
     const obj = {};
-    headers.forEach((h, idx) => obj[h] = vals[idx] || '');
+    // Sanitise every individual cell value
+    headers.forEach((h, idx) => obj[h] = sanitizeText(vals[idx] || ''));
     rows.push(obj);
   }
   return { headers, rows };
@@ -462,11 +452,14 @@ async function sendMessage() {
       }
     });
 
+    // Sanitise all message content one final time before JSON encoding
+    messages.forEach(m => { m.content = sanitizeText(m.content); });
+
     // Build request body and validate JSON before sending
     const requestBody = {
       model: 'claude-sonnet-4-20250514',
       max_tokens: 2048,
-      system: SYSTEM_PROMPT,
+      system: sanitizeText(SYSTEM_PROMPT),
       messages: messages,
     };
     let bodyJson;
@@ -475,8 +468,14 @@ async function sendMessage() {
       // Validate roundtrip: parse it back to catch encoding issues
       JSON.parse(bodyJson);
     } catch (jsonErr) {
+      console.error('[Media Buyer AI] JSON validation failed:', jsonErr);
+      console.error('[Media Buyer AI] First 500 chars of body:', bodyJson?.substring(0, 500));
       throw new Error('Failed to build valid JSON request. Your CSV may contain unsupported characters. Try re-exporting your CSV as UTF-8.');
     }
+
+    // Debug: log first 500 chars of sanitised data being sent
+    console.log('[Media Buyer AI] Request body preview (first 500 chars):', bodyJson.substring(0, 500));
+    console.log('[Media Buyer AI] Total request size:', bodyJson.length, 'chars');
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',

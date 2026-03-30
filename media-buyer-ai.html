@@ -155,6 +155,26 @@ When answering questions:
 - Think in terms of budget efficiency — where is money being wasted and where should it go instead
 - Always end with a prioritised action list: do this today, do this this week`;
 
+// Sanitise text: replace non-ASCII chars (em dashes, curly quotes, etc.) with safe equivalents
+function sanitizeText(text) {
+  return text
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")   // curly single quotes
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')    // curly double quotes
+    .replace(/[\u2013\u2014\u2015]/g, '-')           // en/em dashes
+    .replace(/\u2026/g, '...')                        // ellipsis
+    .replace(/[\u00A0]/g, ' ')                        // non-breaking space
+    .replace(/[\uFFFD\uFEFF]/g, '')                   // BOM / replacement char
+    // Strip any remaining non-ASCII that could cause surrogate issues
+    .replace(/[^\x00-\x7F]/g, function(ch) {
+      // Keep £ sign and common accented chars
+      if (ch === '\u00A3') return '\u00A3'; // £
+      const code = ch.charCodeAt(0);
+      // Keep basic Latin supplement (accents etc)
+      if (code >= 0x00A0 && code <= 0x00FF) return ch;
+      return '';
+    });
+}
+
 // CSV parsing
 function parseCSVLine(line) {
   const result = [];
@@ -177,6 +197,8 @@ function parseCSVLine(line) {
 }
 
 function parseCSV(text) {
+  // Sanitise the entire CSV text before parsing
+  text = sanitizeText(text);
   const lines = text.trim().split('\n');
   const headers = parseCSVLine(lines[0]);
   const rows = [];
@@ -190,13 +212,12 @@ function parseCSV(text) {
   return { headers, rows };
 }
 
+const DATA_CHAR_LIMIT = 50000;
+
 function buildDataSummary() {
   if (!csvData) return '';
   const { headers, rows } = csvData;
   const num = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
-
-  // Build a condensed but complete data summary
-  let summary = `META ADS DATA (${rows.length} rows)\nColumns: ${headers.join(', ')}\n\n`;
 
   // Aggregate by campaign
   const campaigns = {};
@@ -213,16 +234,6 @@ function buildDataSummary() {
     campaigns[c].reach += num(r['Reach']);
   });
 
-  summary += 'CAMPAIGN SUMMARY:\n';
-  Object.entries(campaigns).forEach(([name, d]) => {
-    const roas = d.spend > 0 ? (d.revenue / d.spend).toFixed(2) : '0';
-    const cpp = d.purchases > 0 ? (d.spend / d.purchases).toFixed(2) : 'N/A';
-    const ctr = d.impressions > 0 ? ((d.clicks / d.impressions) * 100).toFixed(2) : '0';
-    const cpm = d.impressions > 0 ? ((d.spend / d.impressions) * 1000).toFixed(2) : '0';
-    const cpc = d.clicks > 0 ? (d.spend / d.clicks).toFixed(2) : 'N/A';
-    summary += `${name}: Spend £${d.spend.toFixed(2)}, Revenue £${d.revenue.toFixed(2)}, ROAS ${roas}x, Purchases ${d.purchases}, CPP £${cpp}, Impressions ${d.impressions}, Clicks ${d.clicks}, CTR ${ctr}%, CPM £${cpm}, CPC £${cpc}, ATC ${d.atc}, Checkouts ${d.checkouts}, Reach ${d.reach}\n`;
-  });
-
   // Aggregate by ad set
   const adSets = {};
   rows.forEach(r => {
@@ -233,14 +244,6 @@ function buildDataSummary() {
     adSets[key].revenue += num(r['Purchases conversion value']);
     adSets[key].impressions += num(r['Impressions']);
     adSets[key].clicks += num(r['Link clicks']);
-  });
-
-  summary += '\nAD SET SUMMARY:\n';
-  Object.entries(adSets).sort((a, b) => b[1].spend - a[1].spend).forEach(([name, d]) => {
-    const roas = d.spend > 0 ? (d.revenue / d.spend).toFixed(2) : '0';
-    const cpp = d.purchases > 0 ? (d.spend / d.purchases).toFixed(2) : 'N/A';
-    const ctr = d.impressions > 0 ? ((d.clicks / d.impressions) * 100).toFixed(2) : '0';
-    summary += `[${d.campaign}] ${name}: Spend £${d.spend.toFixed(2)}, Revenue £${d.revenue.toFixed(2)}, ROAS ${roas}x, Purchases ${d.purchases}, CPP £${cpp}, CTR ${ctr}%\n`;
   });
 
   // Aggregate by ad
@@ -257,14 +260,6 @@ function buildDataSummary() {
     ads[key].checkouts += num(r['Checkouts initiated']);
   });
 
-  summary += '\nAD-LEVEL DETAIL:\n';
-  Object.entries(ads).sort((a, b) => b[1].spend - a[1].spend).forEach(([name, d]) => {
-    const roas = d.spend > 0 ? (d.revenue / d.spend).toFixed(2) : '0';
-    const cpp = d.purchases > 0 ? (d.spend / d.purchases).toFixed(2) : 'N/A';
-    const ctr = d.impressions > 0 ? ((d.clicks / d.impressions) * 100).toFixed(2) : '0';
-    summary += `${name}: Spend £${d.spend.toFixed(2)}, Revenue £${d.revenue.toFixed(2)}, ROAS ${roas}x, Purchases ${d.purchases}, CPP £${cpp}, CTR ${ctr}%, Impressions ${d.impressions}, ATC ${d.atc}, Checkouts ${d.checkouts}\n`;
-  });
-
   // Daily trends
   const daily = {};
   rows.forEach(r => {
@@ -275,6 +270,36 @@ function buildDataSummary() {
     daily[day].purchases += num(r['Purchases']);
   });
 
+  // Totals
+  const totalSpend = Object.values(campaigns).reduce((s, c) => s + c.spend, 0);
+  const totalRevenue = Object.values(campaigns).reduce((s, c) => s + c.revenue, 0);
+  const totalPurchases = Object.values(campaigns).reduce((s, c) => s + c.purchases, 0);
+
+  // Helper to format campaign line
+  function campLine(name, d) {
+    const roas = d.spend > 0 ? (d.revenue / d.spend).toFixed(2) : '0';
+    const cpp = d.purchases > 0 ? (d.spend / d.purchases).toFixed(2) : 'N/A';
+    const ctr = d.impressions > 0 ? ((d.clicks / d.impressions) * 100).toFixed(2) : '0';
+    const cpm = d.impressions > 0 ? ((d.spend / d.impressions) * 1000).toFixed(2) : '0';
+    const cpc = d.clicks > 0 ? (d.spend / d.clicks).toFixed(2) : 'N/A';
+    return `${name}: Spend £${d.spend.toFixed(2)}, Revenue £${d.revenue.toFixed(2)}, ROAS ${roas}x, Purchases ${d.purchases}, CPP £${cpp}, Impressions ${d.impressions}, Clicks ${d.clicks}, CTR ${ctr}%, CPM £${cpm}, CPC £${cpc}, ATC ${d.atc}, Checkouts ${d.checkouts}, Reach ${d.reach}\n`;
+  }
+
+  // Always include: totals, campaigns, ad sets, daily trends
+  let summary = `META ADS DATA (${rows.length} rows)\n\n`;
+  summary += `TOTALS: Spend £${totalSpend.toFixed(2)}, Revenue £${totalRevenue.toFixed(2)}, ROAS ${(totalRevenue/totalSpend).toFixed(2)}x, Purchases ${totalPurchases}, Avg CPP £${(totalSpend/totalPurchases).toFixed(2)}\n\n`;
+
+  summary += 'CAMPAIGN SUMMARY:\n';
+  Object.entries(campaigns).forEach(([name, d]) => { summary += campLine(name, d); });
+
+  summary += '\nAD SET SUMMARY:\n';
+  Object.entries(adSets).sort((a, b) => b[1].spend - a[1].spend).forEach(([name, d]) => {
+    const roas = d.spend > 0 ? (d.revenue / d.spend).toFixed(2) : '0';
+    const cpp = d.purchases > 0 ? (d.spend / d.purchases).toFixed(2) : 'N/A';
+    const ctr = d.impressions > 0 ? ((d.clicks / d.impressions) * 100).toFixed(2) : '0';
+    summary += `[${d.campaign}] ${name}: Spend £${d.spend.toFixed(2)}, Revenue £${d.revenue.toFixed(2)}, ROAS ${roas}x, Purchases ${d.purchases}, CPP £${cpp}, CTR ${ctr}%\n`;
+  });
+
   summary += '\nDAILY TRENDS:\n';
   Object.keys(daily).sort().forEach(day => {
     const d = daily[day];
@@ -282,11 +307,34 @@ function buildDataSummary() {
     summary += `${day}: Spend £${d.spend.toFixed(2)}, Revenue £${d.revenue.toFixed(2)}, ROAS ${roas}x, Purchases ${d.purchases}\n`;
   });
 
-  // Totals
-  const totalSpend = Object.values(campaigns).reduce((s, c) => s + c.spend, 0);
-  const totalRevenue = Object.values(campaigns).reduce((s, c) => s + c.revenue, 0);
-  const totalPurchases = Object.values(campaigns).reduce((s, c) => s + c.purchases, 0);
-  summary += `\nTOTALS: Spend £${totalSpend.toFixed(2)}, Revenue £${totalRevenue.toFixed(2)}, ROAS ${(totalRevenue/totalSpend).toFixed(2)}x, Purchases ${totalPurchases}, Avg CPP £${(totalSpend/totalPurchases).toFixed(2)}\n`;
+  // Only add ad-level detail if within character limit
+  if (summary.length < DATA_CHAR_LIMIT) {
+    let adSection = '\nAD-LEVEL DETAIL:\n';
+    Object.entries(ads).sort((a, b) => b[1].spend - a[1].spend).forEach(([name, d]) => {
+      const roas = d.spend > 0 ? (d.revenue / d.spend).toFixed(2) : '0';
+      const cpp = d.purchases > 0 ? (d.spend / d.purchases).toFixed(2) : 'N/A';
+      const ctr = d.impressions > 0 ? ((d.clicks / d.impressions) * 100).toFixed(2) : '0';
+      adSection += `${name}: Spend £${d.spend.toFixed(2)}, Revenue £${d.revenue.toFixed(2)}, ROAS ${roas}x, Purchases ${d.purchases}, CPP £${cpp}, CTR ${ctr}%, Impressions ${d.impressions}, ATC ${d.atc}, Checkouts ${d.checkouts}\n`;
+    });
+
+    if (summary.length + adSection.length <= DATA_CHAR_LIMIT) {
+      summary += adSection;
+    } else {
+      // Include only top ads by spend that fit
+      summary += '\nAD-LEVEL DETAIL (top ads by spend, truncated to fit):\n';
+      const sortedAds = Object.entries(ads).sort((a, b) => b[1].spend - a[1].spend);
+      for (const [name, d] of sortedAds) {
+        const roas = d.spend > 0 ? (d.revenue / d.spend).toFixed(2) : '0';
+        const cpp = d.purchases > 0 ? (d.spend / d.purchases).toFixed(2) : 'N/A';
+        const ctr = d.impressions > 0 ? ((d.clicks / d.impressions) * 100).toFixed(2) : '0';
+        const line = `${name}: Spend £${d.spend.toFixed(2)}, Revenue £${d.revenue.toFixed(2)}, ROAS ${roas}x, Purchases ${d.purchases}, CPP £${cpp}, CTR ${ctr}%\n`;
+        if (summary.length + line.length > DATA_CHAR_LIMIT) break;
+        summary += line;
+      }
+    }
+  } else {
+    summary += '\n(Ad-level detail omitted - data aggregated at campaign/ad set level to fit size limit)\n';
+  }
 
   return summary;
 }
@@ -414,6 +462,22 @@ async function sendMessage() {
       }
     });
 
+    // Build request body and validate JSON before sending
+    const requestBody = {
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 2048,
+      system: SYSTEM_PROMPT,
+      messages: messages,
+    };
+    let bodyJson;
+    try {
+      bodyJson = JSON.stringify(requestBody);
+      // Validate roundtrip: parse it back to catch encoding issues
+      JSON.parse(bodyJson);
+    } catch (jsonErr) {
+      throw new Error('Failed to build valid JSON request. Your CSV may contain unsupported characters. Try re-exporting your CSV as UTF-8.');
+    }
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -422,12 +486,7 @@ async function sendMessage() {
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true',
       },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 2048,
-        system: SYSTEM_PROMPT,
-        messages: messages,
-      }),
+      body: bodyJson,
     });
 
     if (!response.ok) {

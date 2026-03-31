@@ -69,6 +69,21 @@
   .send-btn:hover { background: #2ea043; }
   .send-btn:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
   .input-hint { font-size: 0.7rem; color: #484f58; text-align: center; margin-top: 8px; }
+
+  /* Data source toggle */
+  .ds-toggle { display: flex; align-items: center; gap: 0; border: 1px solid #30363d; border-radius: 6px; overflow: hidden; flex-shrink: 0; }
+  .ds-toggle button { background: #21262d; border: none; padding: 7px 14px; color: #8b949e; font-size: 0.78rem; cursor: pointer; transition: background 0.2s, color 0.2s; white-space: nowrap; }
+  .ds-toggle button.active { background: #1f6feb; color: #fff; }
+  .ds-toggle button:hover:not(.active) { background: #30363d; }
+
+  /* Live API controls */
+  .live-controls { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .refresh-btn { background: #21262d; border: 1px solid #30363d; border-radius: 6px; padding: 7px 14px; color: #c9d1d9; font-size: 0.78rem; cursor: pointer; transition: border-color 0.2s; white-space: nowrap; }
+  .refresh-btn:hover { border-color: #58a6ff; }
+  .refresh-btn:disabled { color: #484f58; cursor: not-allowed; }
+  .live-status { font-size: 0.72rem; color: #8b949e; white-space: nowrap; }
+  .live-status.ok { color: #3fb950; }
+  .live-status.err { color: #f85149; }
 </style>
 </head>
 <body>
@@ -79,19 +94,29 @@
   <label>API Key:</label>
   <input type="password" id="apiKey" placeholder="sk-ant-api03-...">
   <div class="sep"></div>
-  <div class="upload-zone">
+  <label>Data Source:</label>
+  <div class="ds-toggle">
+    <button id="dsCSV" class="active" onclick="setDataSource('csv')">CSV Upload</button>
+    <button id="dsLive" onclick="setDataSource('live')">Live Meta API</button>
+  </div>
+  <div class="sep"></div>
+  <div class="upload-zone" id="csvZone">
     <label class="upload-btn" id="uploadBtn">
       Upload CSV
       <input type="file" id="csvFile" accept=".csv">
     </label>
     <span class="csv-status" id="csvStatus"></span>
   </div>
+  <div class="live-controls" id="liveZone" style="display:none;">
+    <button class="refresh-btn" id="refreshBtn" onclick="fetchLiveData()">Refresh Data</button>
+    <span class="live-status" id="liveStatus"></span>
+  </div>
 </div>
 
 <div class="main">
   <div class="welcome" id="welcome">
     <h2>Meta Ads Media Buyer Assistant</h2>
-    <p>Upload your Meta Ads CSV export and ask any question. I'll analyse your campaigns like a senior media buyer.</p>
+    <p>Upload a CSV or connect to your live Meta Ads data, then ask any question. I'll analyse your campaigns like a senior media buyer.</p>
     <div class="suggestions" id="suggestions">
       <div class="suggestion" onclick="askSuggestion(this)">
         <span class="sg-icon">&#9994;</span>
@@ -136,6 +161,72 @@
 let csvData = null;
 let csvRawText = '';
 let conversationHistory = [];
+let dataSource = 'csv'; // 'csv' or 'live'
+let liveData = null; // parsed live API response
+let lastFetchedAt = null;
+
+// Data source toggle
+function setDataSource(src) {
+  dataSource = src;
+  document.getElementById('dsCSV').classList.toggle('active', src === 'csv');
+  document.getElementById('dsLive').classList.toggle('active', src === 'live');
+  document.getElementById('csvZone').style.display = src === 'csv' ? '' : 'none';
+  document.getElementById('liveZone').style.display = src === 'live' ? '' : 'none';
+}
+
+// Fetch live data from local backend
+async function fetchLiveData() {
+  const btn = document.getElementById('refreshBtn');
+  const status = document.getElementById('liveStatus');
+  btn.disabled = true;
+  btn.textContent = 'Fetching...';
+  status.textContent = 'Connecting to server...';
+  status.className = 'live-status';
+
+  try {
+    const resp = await fetch('http://localhost:5000/fetch-meta-data');
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.message || err.details || 'Server error ' + resp.status);
+    }
+    const json = await resp.json();
+    if (json.error) throw new Error(json.message || 'API error');
+
+    // Convert Meta API response rows into the same format as CSV parsed data
+    const rows = (json.data || []).map(row => ({
+      'Day': row.day || '',
+      'Campaign name': row.campaign_name || '',
+      'Ad set name': row.adset_name || '',
+      'Ad name': row.ad_name || '',
+      'Amount spent (GBP)': String(row.spend || 0),
+      'Purchases': String(row.purchases || 0),
+      'Purchases conversion value': String(row.revenue || 0),
+      'Cost per purchase': String(row.cpp || 0),
+      'Adds to cart': String(row.adds_to_cart || 0),
+      'Checkouts initiated': String(row.checkouts_initiated || 0),
+      'Impressions': String(row.impressions || 0),
+      'Link clicks': String(row.clicks || 0),
+      'CTR (link click-through rate)': String(row.ctr || 0),
+      'CPC (cost per link click)': String(row.cpc || 0),
+      'CPM (cost per 1,000 impressions)': String(row.cpm || 0),
+      'Reach': String(row.reach || 0),
+    }));
+
+    csvData = { headers: Object.keys(rows[0] || {}), rows: rows };
+    lastFetchedAt = new Date();
+    const timeStr = lastFetchedAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    status.textContent = rows.length + ' rows loaded at ' + timeStr;
+    status.className = 'live-status ok';
+    // Reset conversation since data changed
+    conversationHistory = [];
+  } catch (err) {
+    status.textContent = 'Error: ' + err.message;
+    status.className = 'live-status err';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Refresh Data';
+  }
+}
 
 const SYSTEM_PROMPT = `You are an expert Facebook/Meta Ads media buyer analyst. You have been given raw Meta Ads data for an ecommerce brand called Bald Boss that sells men's haircare and skincare products in the UK. You think and analyse like a senior media buyer.
 
@@ -424,7 +515,11 @@ async function sendMessage() {
     return;
   }
   if (!csvData) {
-    alert('Please upload a Meta Ads CSV file first.');
+    if (dataSource === 'live') {
+      alert('Please click "Refresh Data" to fetch data from the Meta API first.');
+    } else {
+      alert('Please upload a Meta Ads CSV file first.');
+    }
     return;
   }
 
